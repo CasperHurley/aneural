@@ -2,7 +2,9 @@
 
 use bevy::prelude::*;
 
-pub const BACKGROUND: &str = "#0d1210";
+/// The canvas behind the graph: pure black, so nodes and edges carry the
+/// colour on their own.
+pub const BACKGROUND: &str = "#000000";
 pub const PANEL: &str = "#131a16";
 pub const TEXT: &str = "#d9d2c5";
 pub const ACCENT: &str = "#9fd18f";
