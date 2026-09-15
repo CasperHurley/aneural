@@ -1,0 +1,53 @@
+{
+  "name": "@aneural/core",
+  "version": "0.1.0",
+  "description": "Native bindings to the Aneural indexing engine (napi-rs).",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aneural/aneural",
+    "directory": "packages/core"
+  },
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "napi": {
+    "binaryName": "aneural-core",
+    "packageName": "@aneural/core",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "build": "napi build --platform --release --esm --manifest-path ../../crates/aneural-napi/Cargo.toml -o .",
+    "build:debug": "napi build --platform --esm --manifest-path ../../crates/aneural-napi/Cargo.toml -o .",
+    "artifacts": "napi artifacts",
+    "prepublishOnly": "napi prepublish -t npm",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

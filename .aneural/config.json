@@ -1,0 +1,55 @@
+{
+  "$schema": "https://aneural.dev/schema/config-v1.json",
+  "version": 1,
+  "name": "Aneural",
+  "roots": [
+    "."
+  ],
+  "respectGitignore": true,
+  "ignore": [
+    "**/node_modules/**",
+    "**/target/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.git/**",
+    "**/.turbo/**",
+    "**/__pycache__/**",
+    "**/.venv/**",
+    "**/vendor/**"
+  ],
+  "languages": [
+    "typescript",
+    "javascript",
+    "python",
+    "rust",
+    "go",
+    "java",
+    "php",
+    "ruby"
+  ],
+  "typescript": {
+    "tsconfig": "auto",
+    "conditionNames": [
+      "import",
+      "require",
+      "node",
+      "types",
+      "default"
+    ]
+  },
+  "spores": {
+    "enabled": [
+      "comments",
+      "plans",
+      "icebox",
+      "wiki-links"
+    ],
+    "registry": "https://raw.githubusercontent.com/aneural/spores/main/registry.json"
+  },
+  "nodeTypes": {},
+  "gui": {
+    "theme": "mycelium-dark",
+    "labelZoomThreshold": 0.8,
+    "growthBudgetPerFrame": 200
+  }
+}

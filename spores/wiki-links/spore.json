@@ -1,0 +1,48 @@
+{
+  "$schema": "https://aneural.dev/schema/spore-v1.json",
+  "name": "wiki-links",
+  "version": "0.1.0",
+  "displayName": "Notes & Wiki-links",
+  "description": "Obsidian-style knowledge without the vault: `.aneural/notes/*.md` become Note nodes, and every `[[Wiki Link]]` in any markdown file becomes a RELATES_TO edge between files.",
+  "license": "MIT",
+  "aneural": ">=0.1",
+  "nodeTypes": [
+    {
+      "kind": "Note",
+      "label": "Note",
+      "icon": "LuStickyNote",
+      "color": "#86c5c0",
+      "shape": "square",
+      "description": "A note kept in .aneural/notes"
+    }
+  ],
+  "edgeTypes": [{ "kind": "RELATES_TO", "label": "relates to", "style": "dashed" }],
+  "harvesters": [
+    {
+      "id": "notes",
+      "kind": "markdown",
+      "include": [".aneural/notes/**/*.md"],
+      "granularity": "document",
+      "emit": {
+        "node": {
+          "kind": "Note",
+          "id": "note:{file}",
+          "label": "{title}",
+          "props": { "file": "{file}" }
+        },
+        "edges": [
+          { "kind": "RELATES_TO", "src": "$node", "dst": "file:{file}", "props": { "via": "source" } }
+        ]
+      },
+      "wikilinks": { "edgeKind": "RELATES_TO" }
+    },
+    {
+      "id": "links",
+      "kind": "markdown",
+      "include": ["**/*.md", "**/*.mdx"],
+      "exclude": [".aneural/notes/**"],
+      "granularity": "document",
+      "wikilinks": { "edgeKind": "RELATES_TO" }
+    }
+  ]
+}

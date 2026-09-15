@@ -1,0 +1,40 @@
+{
+  "$schema": "https://aneural.dev/schema/spore-v1.json",
+  "name": "comments",
+  "version": "0.1.0",
+  "displayName": "Code Comments",
+  "description": "Surfaces TODO / FIXME / HACK / NOTE / XXX and `claude:` marker comments left in source files as Comment nodes attached to the file they live in.",
+  "license": "MIT",
+  "aneural": ">=0.1",
+  "nodeTypes": [
+    {
+      "kind": "Comment",
+      "label": "Comment",
+      "icon": "LuMessageSquare",
+      "color": "#e8c170",
+      "shape": "pill",
+      "description": "A marker comment harvested from code"
+    }
+  ],
+  "edgeTypes": [{ "kind": "ANNOTATES", "label": "annotates", "style": "dotted" }],
+  "harvesters": [
+    {
+      "id": "markers",
+      "kind": "regex",
+      "include": ["**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,rs,go,java,php,rb,md}"],
+      "pattern": "(?:^|//|#|/\\*+|\\*|--|<!--)\\s*(?P<tag>(?i:TODO|FIXME|HACK|NOTE|XXX|claude))\\b[:\\s-]*(?P<text>.+?)\\s*(?:\\*/|-->)?\\s*$",
+      "emit": {
+        "node": {
+          "kind": "Comment",
+          "id": "comment:{file}#{hash(text)}",
+          "label": "{text}",
+          "props": { "tag": "{upper(tag)}", "line": "{line}", "file": "{file}" }
+        },
+        "edges": [
+          { "kind": "ANNOTATES", "src": "$node", "dst": "file:{file}", "props": { "line": "{line}" } }
+        ]
+      }
+    }
+  ],
+  "panel": { "title": "Comments", "columns": ["tag", "file", "line"] }
+}

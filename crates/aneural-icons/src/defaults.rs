@@ -23,10 +23,15 @@ pub fn default_icon(kind: &str, path: Option<&Path>) -> &'static str {
 /// Icon for a file by extension or well-known name.
 pub fn file_icon(path: &Path) -> &'static str {
     let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-    if name.eq_ignore_ascii_case("dockerfile") || name.to_ascii_lowercase().starts_with("dockerfile.") {
+    if name.eq_ignore_ascii_case("dockerfile")
+        || name.to_ascii_lowercase().starts_with("dockerfile.")
+    {
         return "SiDocker";
     }
-    let ext = path.extension().and_then(|s| s.to_str()).map(|s| s.to_ascii_lowercase());
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase());
     match ext.as_deref() {
         Some("ts" | "tsx" | "mts" | "cts") => "SiTypescript",
         Some("js" | "jsx" | "mjs" | "cjs") => "SiJavascript",
@@ -71,11 +76,26 @@ mod tests {
 
     #[test]
     fn kinds_and_extensions() {
-        assert_eq!(default_icon("File", Some(Path::new("a.tsx"))), "SiTypescript");
-        assert_eq!(default_icon("File", Some(Path::new("src/main.RS"))), "SiRust");
-        assert_eq!(default_icon("File", Some(Path::new("Dockerfile"))), "SiDocker");
-        assert_eq!(default_icon("File", Some(Path::new("pnpm-lock.yaml"))), "SiYaml");
-        assert_eq!(default_icon("File", Some(Path::new("Cargo.lock"))), "VsLock");
+        assert_eq!(
+            default_icon("File", Some(Path::new("a.tsx"))),
+            "SiTypescript"
+        );
+        assert_eq!(
+            default_icon("File", Some(Path::new("src/main.RS"))),
+            "SiRust"
+        );
+        assert_eq!(
+            default_icon("File", Some(Path::new("Dockerfile"))),
+            "SiDocker"
+        );
+        assert_eq!(
+            default_icon("File", Some(Path::new("pnpm-lock.yaml"))),
+            "SiYaml"
+        );
+        assert_eq!(
+            default_icon("File", Some(Path::new("Cargo.lock"))),
+            "VsLock"
+        );
         assert_eq!(default_icon("File", Some(Path::new("weird.xyz"))), "LuFile");
         assert_eq!(default_icon("File", None), "LuFile");
         assert_eq!(default_icon("Directory", None), "LuFolder");
@@ -85,14 +105,38 @@ mod tests {
 
     #[test]
     fn every_default_is_registered() {
-        for kind in ["Directory", "File", "Repo", "Manifest", "Package", "Symbol", "Comment", "Plan", "Idea", "Note", "Nope"] {
+        for kind in [
+            "Directory",
+            "File",
+            "Repo",
+            "Manifest",
+            "Package",
+            "Symbol",
+            "Comment",
+            "Plan",
+            "Idea",
+            "Note",
+            "Nope",
+        ] {
             assert!(is_valid(default_icon(kind, None)), "{kind}");
         }
-        for ext in ["ts", "js", "py", "rs", "go", "java", "php", "rb", "md", "json", "yaml", "toml", "html", "css", "sh", "sql", "png", "lock", "bin"] {
+        for ext in [
+            "ts", "js", "py", "rs", "go", "java", "php", "rb", "md", "json", "yaml", "toml",
+            "html", "css", "sh", "sql", "png", "lock", "bin",
+        ] {
             let p = format!("x.{ext}");
             assert!(is_valid(file_icon(Path::new(&p))), "{ext}");
         }
-        for eco in ["npm", "cargo", "pypi", "go", "maven", "packagist", "rubygems", "other"] {
+        for eco in [
+            "npm",
+            "cargo",
+            "pypi",
+            "go",
+            "maven",
+            "packagist",
+            "rubygems",
+            "other",
+        ] {
             assert!(is_valid(ecosystem_icon(eco)), "{eco}");
         }
     }

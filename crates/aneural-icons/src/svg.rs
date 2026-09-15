@@ -41,7 +41,11 @@ pub fn to_svg(icon: Icon, px: u32, color: &str) -> String {
 }
 
 fn swap<'a>(value: &'a str, color: &'a str) -> &'a str {
-    if value == "currentColor" { color } else { value }
+    if value == "currentColor" {
+        color
+    } else {
+        value
+    }
 }
 
 #[cfg(test)]

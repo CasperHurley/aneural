@@ -1,6 +1,6 @@
 //! The `.aneural/` directory: paths, discovery, init, and the small JSON files.
 
-use crate::config::{builtin_node_types, Config, NodeTypeDef};
+use crate::config::{Config, NodeTypeDef, builtin_node_types};
 use crate::focus::Focus;
 use crate::{Error, Result};
 use std::path::{Path, PathBuf};
@@ -14,17 +14,25 @@ pub struct Workspace {
 
 impl Workspace {
     /// A workspace rooted at `root` (which may or may not have `.aneural/` yet).
+    /// The root is canonicalised when it exists so that resolved import paths
+    /// (which tools like oxc_resolver return canonicalised) compare equal.
     pub fn at(root: impl Into<PathBuf>) -> Self {
-        Workspace { root: root.into() }
+        let root: PathBuf = root.into();
+        let root = root.canonicalize().unwrap_or(root);
+        Workspace { root }
     }
 
     /// Walk up from `start` to the nearest directory containing `.aneural/`.
     pub fn find(start: impl AsRef<Path>) -> Result<Self> {
         let start = start.as_ref();
-        let mut cur = Some(if start.is_absolute() { start.to_path_buf() } else { std::env::current_dir()?.join(start) });
+        let mut cur = Some(if start.is_absolute() {
+            start.to_path_buf()
+        } else {
+            std::env::current_dir()?.join(start)
+        });
         while let Some(dir) = cur {
             if dir.join(ANEURAL_DIR).is_dir() {
-                return Ok(Workspace { root: dir });
+                return Ok(Workspace::at(dir));
             }
             cur = dir.parent().map(Path::to_path_buf);
         }
@@ -77,18 +85,27 @@ impl Workspace {
 
     /// Workspace-relative canonical path for an absolute path inside the workspace.
     pub fn rel(&self, abs: &Path) -> Option<String> {
-        abs.strip_prefix(&self.root).ok().map(crate::id::canonical_rel)
+        abs.strip_prefix(&self.root)
+            .ok()
+            .map(crate::id::canonical_rel)
     }
 
     pub fn abs(&self, rel: &str) -> PathBuf {
-        if rel == "." { self.root.clone() } else { self.root.join(rel) }
+        if rel == "." {
+            self.root.clone()
+        } else {
+            self.root.join(rel)
+        }
     }
 
     /// Create `.aneural/` with a default config. Errors if it exists unless `force`.
     pub fn init(&self, name: Option<&str>, force: bool) -> Result<Config> {
         let dir = self.aneural_dir();
         if dir.exists() && !force && self.config_path().exists() {
-            return Err(Error::Invalid(format!("{} already exists (use --force to overwrite config)", dir.display())));
+            return Err(Error::Invalid(format!(
+                "{} already exists (use --force to overwrite config)",
+                dir.display()
+            )));
         }
         for d in [
             dir.clone(),
@@ -105,7 +122,11 @@ impl Workspace {
         let config = Config {
             name: name
                 .map(String::from)
-                .or_else(|| self.root.file_name().map(|s| s.to_string_lossy().into_owned()))
+                .or_else(|| {
+                    self.root
+                        .file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                })
                 .unwrap_or_else(|| "workspace".into()),
             ..Config::default()
         };
@@ -116,7 +137,10 @@ impl Workspace {
         }
         let icebox = self.icebox_dir().join("ideas.md");
         if !icebox.exists() {
-            std::fs::write(&icebox, "# Icebox\n\nEach `## heading` below becomes an Idea node.\n")?;
+            std::fs::write(
+                &icebox,
+                "# Icebox\n\nEach `## heading` below becomes an Idea node.\n",
+            )?;
         }
         Ok(config)
     }
@@ -125,7 +149,11 @@ impl Workspace {
         let path = self.config_path();
         if !path.exists() {
             return Ok(Config {
-                name: self.root.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+                name: self
+                    .root
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
                 ..Config::default()
             });
         }
@@ -153,9 +181,32 @@ impl Workspace {
     }
 
     /// Node type definitions: builtins, then `.aneural/nodes/*.json`, then
-    /// `config.nodeTypes` overrides. Spore-provided kinds are merged by the engine.
+    /// `config.nodeTypes` overrides. Spore-provided kinds are merged by the
+    /// engine via [`Workspace::compose_node_types`].
     pub fn load_node_types(&self, config: &Config) -> Result<Vec<NodeTypeDef>> {
+        self.compose_node_types(config, Vec::new())
+    }
+
+    /// Layer node types: builtins < `extra` (spores) < `.aneural/nodes/*.json` < config overrides.
+    pub fn compose_node_types(
+        &self,
+        config: &Config,
+        extra: Vec<NodeTypeDef>,
+    ) -> Result<Vec<NodeTypeDef>> {
         let mut defs = builtin_node_types();
+        for def in extra {
+            merge_node_type(&mut defs, def);
+        }
+        for def in self.workspace_node_types()? {
+            merge_node_type(&mut defs, def);
+        }
+        apply_node_type_overrides(&mut defs, config);
+        Ok(defs)
+    }
+
+    /// Definitions declared in `.aneural/nodes/*.json`.
+    pub fn workspace_node_types(&self) -> Result<Vec<NodeTypeDef>> {
+        let mut out = Vec::new();
         if let Ok(rd) = std::fs::read_dir(self.nodes_dir()) {
             let mut entries: Vec<_> = rd.flatten().map(|e| e.path()).collect();
             entries.sort();
@@ -170,20 +221,31 @@ impl Workspace {
                 if def.label.is_empty() {
                     def.label = def.kind.clone();
                 }
-                merge_node_type(&mut defs, def);
+                out.push(def);
             }
         }
-        for (kind, style) in &config.node_types {
-            if let Some(def) = defs.iter_mut().find(|d| &d.kind == kind) {
-                def.apply(style);
-            } else {
-                let mut def = NodeTypeDef::new(kind, kind, NodeTypeDef::FALLBACK_ICON, "#9aa0a6", "circle", "");
-                def.provider = "workspace".into();
-                def.apply(style);
-                defs.push(def);
-            }
+        Ok(out)
+    }
+}
+
+/// Apply `config.nodeTypes` style overrides, creating lightweight kinds as needed.
+pub fn apply_node_type_overrides(defs: &mut Vec<NodeTypeDef>, config: &Config) {
+    for (kind, style) in &config.node_types {
+        if let Some(def) = defs.iter_mut().find(|d| &d.kind == kind) {
+            def.apply(style);
+        } else {
+            let mut def = NodeTypeDef::new(
+                kind,
+                kind,
+                NodeTypeDef::FALLBACK_ICON,
+                "#9aa0a6",
+                "circle",
+                "",
+            );
+            def.provider = "workspace".into();
+            def.apply(style);
+            defs.push(def);
         }
-        Ok(defs)
     }
 }
 
@@ -198,11 +260,15 @@ pub fn merge_node_type(defs: &mut Vec<NodeTypeDef>, def: NodeTypeDef) {
 
 /// Write via temp file + rename so readers never observe a partial file.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    let parent = path.parent().ok_or_else(|| Error::Invalid(format!("no parent for {}", path.display())))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| Error::Invalid(format!("no parent for {}", path.display())))?;
     std::fs::create_dir_all(parent)?;
     let tmp = parent.join(format!(
         ".{}.tmp-{}",
-        path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+        path.file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default(),
         std::process::id()
     ));
     std::fs::write(&tmp, bytes)?;
@@ -225,7 +291,7 @@ mod tests {
         assert_eq!(cfg.name, "test");
         assert!(ws.init(None, false).is_err());
         let found = Workspace::find(tmp.join("a/b")).unwrap();
-        assert_eq!(found.root(), tmp.as_path());
+        assert_eq!(found.root(), tmp.canonicalize().unwrap().as_path());
         assert_eq!(found.load_config().unwrap().name, "test");
 
         assert!(ws.read_focus().unwrap().is_none());
@@ -233,12 +299,19 @@ mod tests {
         ws.write_focus(&f).unwrap();
         assert_eq!(ws.read_focus().unwrap().unwrap(), f);
 
-        std::fs::write(ws.nodes_dir().join("decision.json"), r##"{"kind":"Decision","icon":"LuScale","color":"#8ab4f8"}"##).unwrap();
+        std::fs::write(
+            ws.nodes_dir().join("decision.json"),
+            r##"{"kind":"Decision","icon":"LuScale","color":"#8ab4f8"}"##,
+        )
+        .unwrap();
         let types = ws.load_node_types(&cfg).unwrap();
         let d = types.iter().find(|t| t.kind == "Decision").unwrap();
         assert_eq!(d.label, "Decision");
         assert_eq!(d.provider, "workspace");
-        assert_eq!(ws.rel(&tmp.join("a/b")).as_deref(), Some("a/b"));
+        assert_eq!(
+            ws.rel(&tmp.canonicalize().unwrap().join("a/b")).as_deref(),
+            Some("a/b")
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

@@ -38,7 +38,11 @@ impl Default for Focus {
 
 impl Focus {
     pub fn new(workspace: impl Into<String>) -> Self {
-        Focus { workspace: workspace.into(), updated_at: crate::now_rfc3339(), ..Default::default() }
+        Focus {
+            workspace: workspace.into(),
+            updated_at: crate::now_rfc3339(),
+            ..Default::default()
+        }
     }
 
     /// Everything the user has explicitly pointed at (primary + pinned).
@@ -107,7 +111,10 @@ pub struct Neighborhood {
 
 impl Default for Neighborhood {
     fn default() -> Self {
-        Neighborhood { depth: 1, direction: Direction::Both }
+        Neighborhood {
+            depth: 1,
+            direction: Direction::Both,
+        }
     }
 }
 
@@ -133,7 +140,10 @@ mod tests {
     fn empty_filters_allow_everything() {
         let f = Filters::default();
         assert!(f.allows_kind("File"));
-        let g = Filters { kinds: vec!["File".into()], ..Default::default() };
+        let g = Filters {
+            kinds: vec!["File".into()],
+            ..Default::default()
+        };
         assert!(!g.allows_kind("Directory"));
     }
 }

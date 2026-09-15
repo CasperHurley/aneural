@@ -1,0 +1,45 @@
+{
+  "$schema": "https://aneural.dev/schema/spore-v1.json",
+  "name": "plans",
+  "version": "0.1.0",
+  "displayName": "Plans",
+  "description": "Turns plan documents (Claude Code plan files, `.aneural/plans`, `docs/plans`) into Plan nodes that annotate the files they target via a `targets:` frontmatter list.",
+  "license": "MIT",
+  "aneural": ">=0.1",
+  "nodeTypes": [
+    {
+      "kind": "Plan",
+      "label": "Plan",
+      "icon": "LuMap",
+      "color": "#a58cd6",
+      "shape": "hexagon",
+      "description": "A plan document"
+    }
+  ],
+  "edgeTypes": [
+    { "kind": "ANNOTATES", "label": "annotates", "style": "dotted" },
+    { "kind": "RELATES_TO", "label": "relates to", "style": "dashed" }
+  ],
+  "harvesters": [
+    {
+      "id": "plan-docs",
+      "kind": "markdown",
+      "include": [".aneural/plans/**/*.md", "**/.claude/plans/**/*.md", "**/docs/plans/**/*.md", "**/plans/*.md"],
+      "granularity": "document",
+      "emit": {
+        "node": {
+          "kind": "Plan",
+          "id": "plan:{file}",
+          "label": "{title}",
+          "props": { "file": "{file}", "status": "{fm.status}" }
+        },
+        "edges": [
+          { "kind": "RELATES_TO", "src": "$node", "dst": "file:{file}", "props": { "via": "source" } }
+        ]
+      },
+      "annotate": { "frontmatterKey": "targets", "edgeKind": "ANNOTATES" },
+      "wikilinks": { "edgeKind": "RELATES_TO" }
+    }
+  ],
+  "panel": { "title": "Plans", "columns": ["status", "file"] }
+}

@@ -1,0 +1,8 @@
+{
+  "$schema": "https://aneural.dev/schema/config-v1.json",
+  "version": 1,
+  "name": "sample-workspace",
+  "roots": ["."],
+  "respectGitignore": true,
+  "nodeTypes": { "Idea": { "color": "#f5c542" } }
+}

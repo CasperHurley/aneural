@@ -77,11 +77,24 @@ mod tests {
     #[test]
     fn names_used_by_aneural_core_builtins_exist() {
         for name in [
-            "LuFolder", "LuFile", "VsRepo", "VsPackage", "LuPackage", "VsSymbolMethod",
-            "LuCircleDot", "LuMessageSquare", "LuMap", "LuLightbulb", "LuStickyNote",
-            "LuPuzzle", "LuSprout",
+            "LuFolder",
+            "LuFile",
+            "VsRepo",
+            "VsPackage",
+            "LuPackage",
+            "VsSymbolMethod",
+            "LuCircleDot",
+            "LuMessageSquare",
+            "LuMap",
+            "LuLightbulb",
+            "LuStickyNote",
+            "LuPuzzle",
+            "LuSprout",
         ] {
-            assert!(is_valid(name), "core builtin icon {name} missing from registry");
+            assert!(
+                is_valid(name),
+                "core builtin icon {name} missing from registry"
+            );
         }
     }
 }

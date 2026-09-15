@@ -17,3 +17,7 @@ packages/core/index.d.ts
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# fixtures keep their node_modules stubs
+!fixtures/**/node_modules/
+!crates/**/tests/fixtures/**/node_modules/

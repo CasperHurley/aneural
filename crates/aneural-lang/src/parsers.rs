@@ -52,9 +52,10 @@ pub fn ts_language(lang: &str, path: Option<&Path>) -> Result<TsLanguage, Error>
 pub fn parser_for(lang: &str, path: Option<&Path>) -> Result<Parser, Error> {
     let language = ts_language(lang, path)?;
     let mut parser = Parser::new();
-    parser
-        .set_language(&language)
-        .map_err(|e| Error::Abi { lang: lang.to_string(), message: e.to_string() })?;
+    parser.set_language(&language).map_err(|e| Error::Abi {
+        lang: lang.to_string(),
+        message: e.to_string(),
+    })?;
     Ok(parser)
 }
 

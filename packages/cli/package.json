@@ -1,0 +1,39 @@
+{
+  "name": "aneural",
+  "version": "0.1.0",
+  "description": "Aneural CLI: init a .aneural workspace, index it, manage spores, serve MCP context.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aneural/aneural",
+    "directory": "packages/cli"
+  },
+  "type": "module",
+  "bin": {
+    "aneural": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aneural/core": "workspace:*",
+    "@aneural/mcp": "workspace:*",
+    "commander": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::Path;
 
-#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(transparent)]
 pub struct NodeId(pub String);
 
@@ -60,7 +62,11 @@ impl NodeId {
     }
 
     pub fn idea(rel: impl AsRef<Path>, heading: &str) -> Self {
-        NodeId(format!("idea:{}#{}", canonical_rel(rel.as_ref()), crate::slug(heading)))
+        NodeId(format!(
+            "idea:{}#{}",
+            canonical_rel(rel.as_ref()),
+            crate::slug(heading)
+        ))
     }
 
     /// Generic constructor for spore-defined kinds: `<prefix>:<path>[#fragment]`.
@@ -175,7 +181,10 @@ mod tests {
         assert_eq!(c, NodeId::comment("a.ts", "  TODO: x \n"));
 
         assert_eq!(NodeId::package("npm", "react").as_str(), "pkg:npm/react");
-        assert_eq!(NodeId::idea("x.md", "Big Idea!").as_str(), "idea:x.md#big-idea");
+        assert_eq!(
+            NodeId::idea("x.md", "Big Idea!").as_str(),
+            "idea:x.md#big-idea"
+        );
         assert!(NodeId::parse("nope").is_err());
         assert!(NodeId::parse("file:a").is_ok());
     }

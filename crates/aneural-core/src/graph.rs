@@ -30,7 +30,12 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn new(id: NodeId, kind: impl Into<String>, label: impl Into<String>, source: impl Into<String>) -> Self {
+    pub fn new(
+        id: NodeId,
+        kind: impl Into<String>,
+        label: impl Into<String>,
+        source: impl Into<String>,
+    ) -> Self {
         Node {
             id,
             kind: kind.into(),
@@ -85,7 +90,12 @@ pub struct Edge {
 }
 
 impl Edge {
-    pub fn new(kind: impl Into<String>, src: NodeId, dst: NodeId, source: impl Into<String>) -> Self {
+    pub fn new(
+        kind: impl Into<String>,
+        src: NodeId,
+        dst: NodeId,
+        source: impl Into<String>,
+    ) -> Self {
         Edge {
             kind: kind.into(),
             src,
@@ -111,7 +121,9 @@ impl Edge {
 
 /// Where in the indexing lifecycle a delta was produced. The GUI uses this to
 /// decide how dramatic the growth animation should be.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum DeltaPhase {
     /// Part of the initial full index.
@@ -147,7 +159,10 @@ impl GraphDelta {
     }
 
     pub fn new(phase: DeltaPhase) -> Self {
-        GraphDelta { phase, ..Default::default() }
+        GraphDelta {
+            phase,
+            ..Default::default()
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -214,7 +229,8 @@ mod tests {
     #[test]
     fn delta_merge() {
         let mut a = GraphDelta::new(DeltaPhase::Initial);
-        a.nodes.push(Node::new(NodeId::dir("."), "Directory", ".", "walker"));
+        a.nodes
+            .push(Node::new(NodeId::dir("."), "Directory", ".", "walker"));
         let mut b = GraphDelta::new(DeltaPhase::Initial);
         b.initial_complete = true;
         a.merge(b);

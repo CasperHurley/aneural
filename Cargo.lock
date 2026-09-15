@@ -180,6 +180,7 @@ name = "aneural-engine"
 version = "0.1.0"
 dependencies = [
  "aneural-core",
+ "aneural-icons",
  "aneural-lang",
  "aneural-store",
  "blake3",
@@ -189,6 +190,7 @@ dependencies = [
  "notify",
  "notify-debouncer-full",
  "regex",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",
@@ -264,9 +266,11 @@ dependencies = [
  "aneural-engine",
  "aneural-icons",
  "aneural-store",
+ "crossbeam-channel",
  "napi",
  "napi-build",
  "napi-derive",
+ "serde",
  "serde_json",
 ]
 

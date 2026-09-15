@@ -15,11 +15,11 @@ mod raster;
 pub use icondata_core::{Icon, IconData};
 
 pub use defaults::{default_icon, ecosystem_icon};
-pub use registry::{is_valid, lookup, names, ICONS};
+pub use registry::{ICONS, is_valid, lookup, names};
 pub use svg::to_svg;
 
 #[cfg(feature = "raster")]
-pub use raster::{rasterize, rasterize_named, Rgba};
+pub use raster::{Rgba, rasterize, rasterize_named};
 
 /// Icon name used when a configured icon does not exist in the registry.
 pub const FALLBACK_ICON: &str = "LuCircleDot";

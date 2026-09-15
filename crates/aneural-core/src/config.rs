@@ -137,7 +137,10 @@ pub struct SporesConfig {
 impl Default for SporesConfig {
     fn default() -> Self {
         SporesConfig {
-            enabled: ["comments", "plans", "icebox", "wiki-links"].into_iter().map(String::from).collect(),
+            enabled: ["comments", "plans", "icebox", "wiki-links"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
             registry: "https://raw.githubusercontent.com/aneural/spores/main/registry.json".into(),
         }
     }
@@ -155,7 +158,11 @@ pub struct GuiConfig {
 
 impl Default for GuiConfig {
     fn default() -> Self {
-        GuiConfig { theme: "mycelium-dark".into(), label_zoom_threshold: 0.8, growth_budget_per_frame: 200 }
+        GuiConfig {
+            theme: "mycelium-dark".into(),
+            label_zoom_threshold: 0.8,
+            growth_budget_per_frame: 200,
+        }
     }
 }
 
@@ -209,7 +216,14 @@ impl NodeTypeDef {
         "circle".into()
     }
 
-    pub fn new(kind: &str, label: &str, icon: &str, color: &str, shape: &str, description: &str) -> Self {
+    pub fn new(
+        kind: &str,
+        label: &str,
+        icon: &str,
+        color: &str,
+        shape: &str,
+        description: &str,
+    ) -> Self {
         NodeTypeDef {
             kind: kind.into(),
             label: label.into(),
@@ -240,12 +254,54 @@ impl NodeTypeDef {
 /// Node types the engine produces itself, with the default mycelium palette.
 pub fn builtin_node_types() -> Vec<NodeTypeDef> {
     vec![
-        NodeTypeDef::new(NodeKind::DIRECTORY, "Directory", "LuFolder", "#8fae6b", "circle", "A folder in the workspace"),
-        NodeTypeDef::new(NodeKind::FILE, "File", "LuFile", "#d9d2c5", "circle", "A source or asset file"),
-        NodeTypeDef::new(NodeKind::REPO, "Repo", "VsRepo", "#e0a458", "hexagon", "A git repository root"),
-        NodeTypeDef::new(NodeKind::MANIFEST, "Manifest", "VsPackage", "#c78b5e", "square", "A package manifest (package.json, Cargo.toml, ...)"),
-        NodeTypeDef::new(NodeKind::PACKAGE, "Package", "LuPackage", "#7d8aa5", "diamond", "An external dependency"),
-        NodeTypeDef::new(NodeKind::SYMBOL, "Symbol", "VsSymbolMethod", "#b0b0b0", "circle", "An exported symbol (reserved)"),
+        NodeTypeDef::new(
+            NodeKind::DIRECTORY,
+            "Directory",
+            "LuFolder",
+            "#8fae6b",
+            "circle",
+            "A folder in the workspace",
+        ),
+        NodeTypeDef::new(
+            NodeKind::FILE,
+            "File",
+            "LuFile",
+            "#d9d2c5",
+            "circle",
+            "A source or asset file",
+        ),
+        NodeTypeDef::new(
+            NodeKind::REPO,
+            "Repo",
+            "VsRepo",
+            "#e0a458",
+            "hexagon",
+            "A git repository root",
+        ),
+        NodeTypeDef::new(
+            NodeKind::MANIFEST,
+            "Manifest",
+            "VsPackage",
+            "#c78b5e",
+            "square",
+            "A package manifest (package.json, Cargo.toml, ...)",
+        ),
+        NodeTypeDef::new(
+            NodeKind::PACKAGE,
+            "Package",
+            "LuPackage",
+            "#7d8aa5",
+            "diamond",
+            "An external dependency",
+        ),
+        NodeTypeDef::new(
+            NodeKind::SYMBOL,
+            "Symbol",
+            "VsSymbolMethod",
+            "#b0b0b0",
+            "circle",
+            "An exported symbol (reserved)",
+        ),
     ]
 }
 

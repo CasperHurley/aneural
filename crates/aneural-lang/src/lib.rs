@@ -4,7 +4,7 @@ pub mod extract;
 pub mod parsers;
 pub mod resolve;
 
-pub use extract::{extract_imports, run_query, Capture, ImportKind, ImportRef};
+pub use extract::{Capture, ImportKind, ImportRef, extract_imports, run_query};
 pub use parsers::{abi_check, lang_for_path, parser_for};
 pub use resolve::{Resolved, Resolver};
 
@@ -33,8 +33,13 @@ pub struct FileAnalysis {
 }
 
 /// Extract and resolve all imports of `path` (absolute) with contents `source`.
-pub fn analyze_file(resolver: &Resolver, path: &Path, source: &[u8]) -> Result<FileAnalysis, Error> {
-    let lang = lang_for_path(path).ok_or_else(|| Error::UnsupportedLanguage(path.display().to_string()))?;
+pub fn analyze_file(
+    resolver: &Resolver,
+    path: &Path,
+    source: &[u8],
+) -> Result<FileAnalysis, Error> {
+    let lang = lang_for_path(path)
+        .ok_or_else(|| Error::UnsupportedLanguage(path.display().to_string()))?;
     let imports = extract_imports(lang, path, source)?;
     let imports = imports
         .into_iter()
@@ -43,5 +48,8 @@ pub fn analyze_file(resolver: &Resolver, path: &Path, source: &[u8]) -> Result<F
             (i, r)
         })
         .collect();
-    Ok(FileAnalysis { lang: lang.to_string(), imports })
+    Ok(FileAnalysis {
+        lang: lang.to_string(),
+        imports,
+    })
 }

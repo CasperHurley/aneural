@@ -1,0 +1,4 @@
+<?php
+namespace App\Http;
+
+final class Router {}

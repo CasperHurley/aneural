@@ -50,7 +50,10 @@ impl SporeManifest {
             errs.push(format!("version `{}` is not valid semver", self.version));
         }
         if semver::VersionReq::parse(&self.aneural).is_err() {
-            errs.push(format!("aneural range `{}` is not a valid semver requirement", self.aneural));
+            errs.push(format!(
+                "aneural range `{}` is not a valid semver requirement",
+                self.aneural
+            ));
         }
         let mut ids = std::collections::HashSet::new();
         for h in &self.harvesters {
@@ -61,7 +64,10 @@ impl SporeManifest {
                 errs.push("harvester id must not be empty".into());
             }
             if let Harvester::Wasm { .. } = h {
-                errs.push(format!("harvester `{}`: wasm harvesters are reserved and not yet supported", h.id()));
+                errs.push(format!(
+                    "harvester `{}`: wasm harvesters are reserved and not yet supported",
+                    h.id()
+                ));
             }
             for nt in &self.node_types {
                 if nt.kind.is_empty() {
@@ -74,7 +80,10 @@ impl SporeManifest {
 
     /// Whether this spore supports the given Aneural version.
     pub fn supports(&self, aneural_version: &str) -> bool {
-        match (semver::VersionReq::parse(&self.aneural), semver::Version::parse(aneural_version)) {
+        match (
+            semver::VersionReq::parse(&self.aneural),
+            semver::Version::parse(aneural_version),
+        ) {
             (Ok(req), Ok(v)) => req.matches(&v),
             _ => false,
         }
@@ -164,7 +173,9 @@ impl Harvester {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum MarkdownGranularity {
     /// One node per document.
@@ -289,7 +300,10 @@ mod tests {
     fn rejects_bad_name_and_wasm() {
         let mut m: SporeManifest = serde_json::from_str(COMMENTS).unwrap();
         m.name = "Bad Name".into();
-        m.harvesters.push(Harvester::Wasm { id: "w".into(), module: "x.wasm".into() });
+        m.harvesters.push(Harvester::Wasm {
+            id: "w".into(),
+            module: "x.wasm".into(),
+        });
         let errs = m.validate();
         assert_eq!(errs.len(), 2, "{errs:?}");
     }

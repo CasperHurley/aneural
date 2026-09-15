@@ -1,0 +1,41 @@
+{
+  "$schema": "https://aneural.dev/schema/spore-v1.json",
+  "name": "icebox",
+  "version": "0.1.0",
+  "displayName": "Icebox",
+  "description": "A lightweight backlog: every `## heading` in `.aneural/icebox/*.md` becomes an Idea node. No tickets, no tracker — just markdown.",
+  "license": "MIT",
+  "aneural": ">=0.1",
+  "nodeTypes": [
+    {
+      "kind": "Idea",
+      "label": "Idea",
+      "icon": "LuLightbulb",
+      "color": "#f5c542",
+      "shape": "diamond",
+      "description": "An idea parked in the icebox"
+    }
+  ],
+  "edgeTypes": [{ "kind": "RELATES_TO", "label": "relates to", "style": "dashed" }],
+  "harvesters": [
+    {
+      "id": "ideas",
+      "kind": "markdown",
+      "include": [".aneural/icebox/**/*.md", "**/icebox/*.md", "**/ICEBOX.md"],
+      "granularity": "heading",
+      "emit": {
+        "node": {
+          "kind": "Idea",
+          "id": "idea:{file}#{slug(heading)}",
+          "label": "{heading}",
+          "props": { "file": "{file}", "line": "{line}", "body": "{body}" }
+        },
+        "edges": [
+          { "kind": "RELATES_TO", "src": "$node", "dst": "file:{file}", "props": { "via": "source" } }
+        ]
+      },
+      "wikilinks": { "edgeKind": "RELATES_TO" }
+    }
+  ],
+  "panel": { "title": "Icebox", "columns": ["file", "line"] }
+}

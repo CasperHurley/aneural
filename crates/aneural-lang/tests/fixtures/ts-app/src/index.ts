@@ -1,0 +1,13 @@
+import { helper } from './util.js';
+import thing, { type Kind } from '@/lib/thing';
+import type { Only } from './types';
+import React from 'react';
+import { x } from '@scope/pkg';
+import lodash from 'lodash';
+import fs from 'node:fs';
+import missing from '@/missing';
+export { re } from './util.js';
+export * from './lib/thing';
+const dyn = await import('./dyn');
+const cjs = require('./cjs.cjs');
+console.log(helper, thing, React, x, lodash, fs, missing, dyn, cjs);

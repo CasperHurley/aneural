@@ -3,8 +3,8 @@
 //! the matched nodes. Everything works on error-recovered trees, so a file
 //! with syntax errors still yields the imports around them.
 
-use crate::parsers::{parser_for, ts_language};
 use crate::Error;
+use crate::parsers::{parser_for, ts_language};
 use aneural_core::config::Language;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -44,8 +44,18 @@ pub struct ImportRef {
 }
 
 impl ImportRef {
-    fn new(specifier: impl Into<String>, symbols: Vec<String>, node: Node<'_>, kind: ImportKind) -> Self {
-        ImportRef { specifier: specifier.into(), symbols, line: line_of(node), kind }
+    fn new(
+        specifier: impl Into<String>,
+        symbols: Vec<String>,
+        node: Node<'_>,
+        kind: ImportKind,
+    ) -> Self {
+        ImportRef {
+            specifier: specifier.into(),
+            symbols,
+            line: line_of(node),
+            kind,
+        }
     }
 }
 
@@ -93,7 +103,9 @@ fn all_children<'t>(node: Node<'t>) -> Vec<Node<'t>> {
 
 /// Whether the node has an anonymous (keyword) child with this text.
 fn has_keyword(node: Node<'_>, kw: &str) -> bool {
-    all_children(node).iter().any(|c| !c.is_named() && c.kind() == kw)
+    all_children(node)
+        .iter()
+        .any(|c| !c.is_named() && c.kind() == kw)
 }
 
 fn first_descendant_of_kind<'t>(node: Node<'t>, kind: &str) -> Option<Node<'t>> {
@@ -124,18 +136,29 @@ fn query_source(lang: &str) -> Result<&'static str, Error> {
 
 fn parse(lang: &str, path: Option<&Path>, source: &[u8]) -> Result<Tree, Error> {
     let mut parser = parser_for(lang, path)?;
-    parser
-        .parse(source, None)
-        .ok_or_else(|| Error::Parse(path.map(|p| p.display().to_string()).unwrap_or_else(|| lang.to_string())))
+    parser.parse(source, None).ok_or_else(|| {
+        Error::Parse(
+            path.map(|p| p.display().to_string())
+                .unwrap_or_else(|| lang.to_string()),
+        )
+    })
 }
 
 fn compile_query(lang: &str, path: Option<&Path>, query_src: &str) -> Result<Query, Error> {
     let language = ts_language(lang, path)?;
-    Query::new(&language, query_src).map_err(|e| Error::Query { lang: lang.to_string(), message: e.to_string() })
+    Query::new(&language, query_src).map_err(|e| Error::Query {
+        lang: lang.to_string(),
+        message: e.to_string(),
+    })
 }
 
 /// Run an arbitrary tree-sitter query; returns the captures of each match.
-pub fn run_query(lang: &str, path: Option<&Path>, query_src: &str, source: &[u8]) -> Result<Vec<Vec<Capture>>, Error> {
+pub fn run_query(
+    lang: &str,
+    path: Option<&Path>,
+    query_src: &str,
+    source: &[u8],
+) -> Result<Vec<Vec<Capture>>, Error> {
     let tree = parse(lang, path, source)?;
     let query = compile_query(lang, path, query_src)?;
     let names = query.capture_names();
@@ -146,7 +169,11 @@ pub fn run_query(lang: &str, path: Option<&Path>, query_src: &str, source: &[u8]
         let caps = m
             .captures()
             .iter()
-            .map(|c| Capture { name: names[c.index as usize].to_string(), text: text(c.node, source).to_string(), line: line_of(c.node) })
+            .map(|c| Capture {
+                name: names[c.index as usize].to_string(),
+                text: text(c.node, source).to_string(),
+                line: line_of(c.node),
+            })
             .collect();
         out.push(caps);
     }
@@ -164,7 +191,11 @@ pub fn extract_imports(lang: &str, path: &Path, source: &[u8]) -> Result<Vec<Imp
     while let Some(m) = matches.next() {
         // The capture whose name is the pattern's "statement" capture comes first
         // in every query above; the others are helpers.
-        let mut by_name: Vec<(&str, Node<'_>)> = m.captures().iter().map(|c| (names[c.index as usize], c.node)).collect();
+        let mut by_name: Vec<(&str, Node<'_>)> = m
+            .captures()
+            .iter()
+            .map(|c| (names[c.index as usize], c.node))
+            .collect();
         by_name.sort_by_key(|(_, n)| n.start_byte());
         let refs = match lang {
             Language::TYPESCRIPT | Language::JAVASCRIPT => js_imports(&by_name, source),
@@ -192,10 +223,16 @@ fn capture<'t>(caps: &[(&str, Node<'t>)], name: &str) -> Option<Node<'t>> {
 
 fn js_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
     if let Some(node) = capture(caps, "import") {
-        let Some(source) = node.child_by_field_name("source") else { return vec![] };
+        let Some(source) = node.child_by_field_name("source") else {
+            return vec![];
+        };
         let specifier = unquote(source, src);
         let mut symbols = Vec::new();
-        let mut kind = if has_keyword(node, "type") { ImportKind::TypeOnly } else { ImportKind::Static };
+        let mut kind = if has_keyword(node, "type") {
+            ImportKind::TypeOnly
+        } else {
+            ImportKind::Static
+        };
         for child in named_children(node) {
             match child.kind() {
                 "import_clause" => {
@@ -214,7 +251,10 @@ fn js_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
                                 any = true;
                             }
                             "named_imports" => {
-                                for spec in named_children(c).into_iter().filter(|n| n.kind() == "import_specifier") {
+                                for spec in named_children(c)
+                                    .into_iter()
+                                    .filter(|n| n.kind() == "import_specifier")
+                                {
                                     any = true;
                                     if !has_keyword(spec, "type") {
                                         all_type = false;
@@ -241,7 +281,9 @@ fn js_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
         return vec![ImportRef::new(specifier, symbols, node, kind)];
     }
     if let Some(node) = capture(caps, "reexport") {
-        let Some(source) = node.child_by_field_name("source") else { return vec![] };
+        let Some(source) = node.child_by_field_name("source") else {
+            return vec![];
+        };
         let specifier = unquote(source, src);
         let mut symbols = Vec::new();
         let mut saw_clause = false;
@@ -249,7 +291,10 @@ fn js_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
             match child.kind() {
                 "export_clause" => {
                     saw_clause = true;
-                    for spec in named_children(child).into_iter().filter(|n| n.kind() == "export_specifier") {
+                    for spec in named_children(child)
+                        .into_iter()
+                        .filter(|n| n.kind() == "export_specifier")
+                    {
                         if let Some(name) = spec.child_by_field_name("name") {
                             symbols.push(text(name, src).to_string());
                         }
@@ -265,13 +310,28 @@ fn js_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
         if !saw_clause {
             symbols.push("*".into());
         }
-        return vec![ImportRef::new(specifier, symbols, node, ImportKind::ReExport)];
+        return vec![ImportRef::new(
+            specifier,
+            symbols,
+            node,
+            ImportKind::ReExport,
+        )];
     }
     if let (Some(node), Some(s)) = (capture(caps, "dynamic"), capture(caps, "dynamic_source")) {
-        return vec![ImportRef::new(unquote(s, src), vec![], node, ImportKind::Dynamic)];
+        return vec![ImportRef::new(
+            unquote(s, src),
+            vec![],
+            node,
+            ImportKind::Dynamic,
+        )];
     }
     if let (Some(node), Some(s)) = (capture(caps, "require"), capture(caps, "require_source")) {
-        return vec![ImportRef::new(unquote(s, src), vec![], node, ImportKind::Require)];
+        return vec![ImportRef::new(
+            unquote(s, src),
+            vec![],
+            node,
+            ImportKind::Require,
+        )];
     }
     vec![]
 }
@@ -283,10 +343,20 @@ fn py_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
         let mut out = Vec::new();
         for child in named_children(node) {
             match child.kind() {
-                "dotted_name" => out.push(ImportRef::new(text(child, src), vec![], node, ImportKind::Static)),
+                "dotted_name" => out.push(ImportRef::new(
+                    text(child, src),
+                    vec![],
+                    node,
+                    ImportKind::Static,
+                )),
                 "aliased_import" => {
                     if let Some(name) = child.child_by_field_name("name") {
-                        out.push(ImportRef::new(text(name, src), vec![], node, ImportKind::Static));
+                        out.push(ImportRef::new(
+                            text(name, src),
+                            vec![],
+                            node,
+                            ImportKind::Static,
+                        ));
                     }
                 }
                 _ => {}
@@ -295,7 +365,9 @@ fn py_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
         return out;
     }
     if let Some(node) = capture(caps, "from") {
-        let Some(module) = node.child_by_field_name("module_name") else { return vec![] };
+        let Some(module) = node.child_by_field_name("module_name") else {
+            return vec![];
+        };
         let specifier = text(module, src).trim().to_string();
         let mut symbols = Vec::new();
         let mut cursor = node.walk();
@@ -310,7 +382,10 @@ fn py_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
                 _ => {}
             }
         }
-        if named_children(node).iter().any(|c| c.kind() == "wildcard_import") {
+        if named_children(node)
+            .iter()
+            .any(|c| c.kind() == "wildcard_import")
+        {
             symbols.push("*".into());
         }
         return vec![ImportRef::new(specifier, symbols, node, ImportKind::Static)];
@@ -327,20 +402,34 @@ fn rs_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
         return out;
     }
     if let (Some(node), Some(name)) = (capture(caps, "mod"), capture(caps, "name")) {
-        return vec![ImportRef::new(text(name, src), vec![], node, ImportKind::Mod)];
+        return vec![ImportRef::new(
+            text(name, src),
+            vec![],
+            node,
+            ImportKind::Mod,
+        )];
     }
     vec![]
 }
 
 fn rs_join(prefix: &str, seg: &str) -> String {
-    if prefix.is_empty() { seg.to_string() } else { format!("{prefix}::{seg}") }
+    if prefix.is_empty() {
+        seg.to_string()
+    } else {
+        format!("{prefix}::{seg}")
+    }
 }
 
 /// Flatten a `use` tree into one ImportRef per path; braces become symbols.
 fn rs_flatten(node: Node<'_>, prefix: &str, stmt: Node<'_>, src: &[u8], out: &mut Vec<ImportRef>) {
     match node.kind() {
         "identifier" | "crate" | "super" | "self" | "metavariable" | "scoped_identifier" => {
-            out.push(ImportRef::new(rs_join(prefix, text(node, src)), vec![], stmt, ImportKind::Static));
+            out.push(ImportRef::new(
+                rs_join(prefix, text(node, src)),
+                vec![],
+                stmt,
+                ImportKind::Static,
+            ));
         }
         "use_as_clause" => {
             if let Some(p) = node.child_by_field_name("path") {
@@ -348,11 +437,23 @@ fn rs_flatten(node: Node<'_>, prefix: &str, stmt: Node<'_>, src: &[u8], out: &mu
             }
         }
         "use_wildcard" => {
-            let inner = named_children(node).into_iter().next().map(|n| text(n, src).to_string()).unwrap_or_default();
-            out.push(ImportRef::new(rs_join(prefix, &inner), vec!["*".into()], stmt, ImportKind::Static));
+            let inner = named_children(node)
+                .into_iter()
+                .next()
+                .map(|n| text(n, src).to_string())
+                .unwrap_or_default();
+            out.push(ImportRef::new(
+                rs_join(prefix, &inner),
+                vec!["*".into()],
+                stmt,
+                ImportKind::Static,
+            ));
         }
         "scoped_use_list" => {
-            let path = node.child_by_field_name("path").map(|p| text(p, src).to_string()).unwrap_or_default();
+            let path = node
+                .child_by_field_name("path")
+                .map(|p| text(p, src).to_string())
+                .unwrap_or_default();
             let full = rs_join(prefix, &path);
             if let Some(list) = node.child_by_field_name("list") {
                 rs_list(list, &full, stmt, src, out);
@@ -397,7 +498,12 @@ fn rs_list(list: Node<'_>, prefix: &str, stmt: Node<'_>, src: &[u8], out: &mut V
 
 fn go_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
     match (capture(caps, "spec"), capture(caps, "path")) {
-        (Some(node), Some(path)) => vec![ImportRef::new(unquote(path, src), vec![], node, ImportKind::Static)],
+        (Some(node), Some(path)) => vec![ImportRef::new(
+            unquote(path, src),
+            vec![],
+            node,
+            ImportKind::Static,
+        )],
         _ => vec![],
     }
 }
@@ -405,7 +511,9 @@ fn go_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
 // ---------------------------------------------------------------- Java
 
 fn java_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
-    let Some(node) = capture(caps, "import") else { return vec![] };
+    let Some(node) = capture(caps, "import") else {
+        return vec![];
+    };
     let path = named_children(node)
         .into_iter()
         .find(|c| matches!(c.kind(), "scoped_identifier" | "identifier"))
@@ -416,9 +524,21 @@ fn java_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
     }
     let wildcard = named_children(node).iter().any(|c| c.kind() == "asterisk");
     if has_keyword(node, "static") {
+        if wildcard {
+            return vec![ImportRef::new(
+                path,
+                vec!["*".into()],
+                node,
+                ImportKind::Static,
+            )];
+        }
         let (module, member) = path.rsplit_once('.').unwrap_or((&path, ""));
-        let symbols = if wildcard { vec!["*".into()] } else { vec![member.to_string()] };
-        return vec![ImportRef::new(module, symbols, node, ImportKind::Static)];
+        return vec![ImportRef::new(
+            module,
+            vec![member.to_string()],
+            node,
+            ImportKind::Static,
+        )];
     }
     let symbols = if wildcard { vec!["*".into()] } else { vec![] };
     vec![ImportRef::new(path, symbols, node, ImportKind::Static)]
@@ -448,7 +568,10 @@ fn php_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
                     }
                 }
                 "namespace_use_group" => {
-                    for clause in named_children(child).into_iter().filter(|c| c.kind() == "namespace_use_clause") {
+                    for clause in named_children(child)
+                        .into_iter()
+                        .filter(|c| c.kind() == "namespace_use_clause")
+                    {
                         let name = named_children(clause)
                             .into_iter()
                             .find(|c| matches!(c.kind(), "qualified_name" | "name"))
@@ -469,10 +592,16 @@ fn php_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
         }
         return out;
     }
-    if let Some(node) = capture(caps, "include") {
-        if let Some(s) = first_descendant_of_kind(node, "string").or_else(|| first_descendant_of_kind(node, "encapsed_string")) {
-            return vec![ImportRef::new(unquote(s, src), vec![], node, ImportKind::Include)];
-        }
+    if let Some(node) = capture(caps, "include")
+        && let Some(s) = first_descendant_of_kind(node, "string")
+            .or_else(|| first_descendant_of_kind(node, "encapsed_string"))
+    {
+        return vec![ImportRef::new(
+            unquote(s, src),
+            vec![],
+            node,
+            ImportKind::Include,
+        )];
     }
     vec![]
 }
@@ -480,8 +609,11 @@ fn php_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
 // ---------------------------------------------------------------- Ruby
 
 fn rb_imports(caps: &[(&str, Node<'_>)], src: &[u8]) -> Vec<ImportRef> {
-    let (Some(node), Some(method), Some(source)) = (capture(caps, "call"), capture(caps, "method"), capture(caps, "source"))
-    else {
+    let (Some(node), Some(method), Some(source)) = (
+        capture(caps, "call"),
+        capture(caps, "method"),
+        capture(caps, "source"),
+    ) else {
         return vec![];
     };
     let kind = match text(method, src) {
