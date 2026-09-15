@@ -15,6 +15,22 @@ macro_rules! icon_table {
 }
 
 icon_table! {
+    icondata_bs::[
+        // file types: one per extension family, drawn as a labelled page
+        BsFiletypeTsx, BsFiletypeJs, BsFiletypeJsx, BsFiletypePy, BsFiletypeJava,
+        BsFiletypePhp, BsFiletypeRb, BsFiletypeCs, BsFiletypeMd, BsFiletypeMdx,
+        BsFiletypeJson, BsFiletypeYml, BsFiletypeXml, BsFiletypeHtml,
+        BsFiletypeCss, BsFiletypeScss, BsFiletypeSass, BsFiletypeSh,
+        BsFiletypeSql, BsFiletypeCsv, BsFiletypeTxt, BsFiletypePdf,
+        BsFiletypePng, BsFiletypeJpg, BsFiletypeGif, BsFiletypeSvg,
+        BsFiletypeBmp, BsFiletypeHeic, BsFiletypeTiff, BsFiletypeRaw,
+        BsFiletypeAi, BsFiletypePsd, BsFiletypeExe, BsFiletypeKey,
+        BsFiletypeTtf, BsFiletypeOtf, BsFiletypeWoff,
+        BsFiletypeMp3, BsFiletypeWav, BsFiletypeAac, BsFiletypeM4p,
+        BsFiletypeMp4, BsFiletypeMov,
+        BsFiletypeDoc, BsFiletypeDocx, BsFiletypeXls, BsFiletypeXlsx,
+        BsFiletypePpt, BsFiletypePptx,
+    ],
     icondata_lu::[
         // structure
         LuFolder, LuFolderOpen, LuFile, LuFileCode, LuFileText, LuFileJson,

@@ -13,6 +13,7 @@ raster = ["dep:resvg", "dep:usvg", "dep:tiny-skia"]
 
 [dependencies]
 icondata_core.workspace = true
+icondata_bs.workspace = true
 icondata_lu.workspace = true
 icondata_si.workspace = true
 icondata_vs.workspace = true

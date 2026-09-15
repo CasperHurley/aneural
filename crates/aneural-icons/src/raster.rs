@@ -56,7 +56,7 @@ mod tests {
 
     #[test]
     fn lucide_and_simple_icons_render_at_64() {
-        for name in ["LuLeaf", "SiRust", "VsRepo"] {
+        for name in ["LuLeaf", "SiRust", "VsRepo", "BsFiletypeTsx"] {
             let img = rasterize_named(name, 64).unwrap();
             assert_eq!((img.width, img.height), (64, 64));
             assert_eq!(img.data.len(), 64 * 64 * 4);

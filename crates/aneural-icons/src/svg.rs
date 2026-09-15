@@ -53,7 +53,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lucide_is_stroked_and_simple_icons_are_filled() {
+    fn lucide_is_stroked_and_other_sets_are_filled() {
         let folder = to_svg(icondata_lu::LuFolder, 32, "#fff");
         assert!(folder.contains(r#"width="32""#));
         assert!(folder.contains(r#"fill="none""#));
@@ -65,6 +65,11 @@ mod tests {
         assert!(rust.contains(r#"fill="white""#));
         assert!(!rust.contains("stroke="));
         assert!(!rust.contains("currentColor"));
+
+        let tsx = to_svg(icondata_bs::BsFiletypeTsx, 24, "cyan");
+        assert!(tsx.contains(r#"viewBox="0 0 16 16""#));
+        assert!(tsx.contains(r#"fill="cyan""#));
+        assert!(!tsx.contains("currentColor"));
 
         let repo = to_svg(icondata_vs::VsRepo, 16, "red");
         assert!(repo.contains(r#"viewBox="0 0 16 16""#));

@@ -224,6 +224,7 @@ dependencies = [
 name = "aneural-icons"
 version = "0.1.0"
 dependencies = [
+ "icondata_bs",
  "icondata_core",
  "icondata_lu",
  "icondata_si",
@@ -3343,6 +3344,15 @@ name = "hexf-parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
+
+[[package]]
+name = "icondata_bs"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2a8a72809ffc53e8a61dd19079693dbc0478b7b27e09ca1c1e81c04e283f485"
+dependencies = [
+ "icondata_core",
+]
 
 [[package]]
 name = "icondata_core"

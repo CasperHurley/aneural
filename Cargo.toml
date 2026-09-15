@@ -57,6 +57,7 @@ oxc_resolver = "11.24"
 
 # icons
 icondata_core = "0.1"
+icondata_bs = "0.1"
 icondata_lu = "0.1"
 icondata_si = "0.1"
 icondata_vs = "0.1"

@@ -21,6 +21,10 @@ pub fn default_icon(kind: &str, path: Option<&Path>) -> &'static str {
 }
 
 /// Icon for a file by extension or well-known name.
+///
+/// Prefers Bootstrap's `BsFiletype*` set, which draws the extension on the
+/// page itself, and falls back to a brand mark for languages Bootstrap has no
+/// filetype glyph for (Rust, Go, TOML, ...).
 pub fn file_icon(path: &Path) -> &'static str {
     let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
     if name.eq_ignore_ascii_case("dockerfile")
@@ -33,23 +37,67 @@ pub fn file_icon(path: &Path) -> &'static str {
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase());
     match ext.as_deref() {
-        Some("ts" | "tsx" | "mts" | "cts") => "SiTypescript",
-        Some("js" | "jsx" | "mjs" | "cjs") => "SiJavascript",
-        Some("py" | "pyi") => "SiPython",
+        // code
+        Some("tsx") => "BsFiletypeTsx",
+        Some("ts" | "mts" | "cts") => "SiTypescript",
+        Some("jsx") => "BsFiletypeJsx",
+        Some("js" | "mjs" | "cjs") => "BsFiletypeJs",
+        Some("py" | "pyi") => "BsFiletypePy",
         Some("rs") => "SiRust",
         Some("go") => "SiGo",
-        Some("java") => "SiOpenjdk",
-        Some("php") => "SiPhp",
-        Some("rb" | "rake" | "gemspec") => "SiRuby",
-        Some("md" | "mdx" | "markdown") => "SiMarkdown",
-        Some("json") => "VsJson",
-        Some("yaml" | "yml") => "SiYaml",
+        Some("java") => "BsFiletypeJava",
+        Some("cs") => "BsFiletypeCs",
+        Some("php") => "BsFiletypePhp",
+        Some("rb" | "rake" | "gemspec") => "BsFiletypeRb",
+        Some("sh" | "zsh" | "bash") => "BsFiletypeSh",
+        Some("sql") => "BsFiletypeSql",
+        Some("db" | "sqlite" | "sqlite3") => "SiSqlite",
+        // markup and data
+        Some("mdx") => "BsFiletypeMdx",
+        Some("md" | "markdown") => "BsFiletypeMd",
+        Some("json" | "jsonc") => "BsFiletypeJson",
+        Some("yaml" | "yml") => "BsFiletypeYml",
         Some("toml") => "SiToml",
-        Some("html" | "htm") => "SiHtml5",
-        Some("css" | "scss" | "sass" | "less") => "SiCss",
-        Some("sh" | "zsh" | "bash") => "SiGnubash",
-        Some("sql" | "db" | "sqlite" | "sqlite3") => "SiSqlite",
-        Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "ico" | "bmp") => "LuImage",
+        Some("xml") => "BsFiletypeXml",
+        Some("csv" | "tsv") => "BsFiletypeCsv",
+        Some("html" | "htm") => "BsFiletypeHtml",
+        Some("scss") => "BsFiletypeScss",
+        Some("sass") => "BsFiletypeSass",
+        Some("css" | "less") => "BsFiletypeCss",
+        Some("txt" | "text") => "BsFiletypeTxt",
+        Some("pdf") => "BsFiletypePdf",
+        // images
+        Some("png") => "BsFiletypePng",
+        Some("jpg" | "jpeg") => "BsFiletypeJpg",
+        Some("gif") => "BsFiletypeGif",
+        Some("svg") => "BsFiletypeSvg",
+        Some("bmp") => "BsFiletypeBmp",
+        Some("heic" | "heif") => "BsFiletypeHeic",
+        Some("tiff" | "tif") => "BsFiletypeTiff",
+        Some("raw" | "cr2" | "nef" | "arw") => "BsFiletypeRaw",
+        Some("ai") => "BsFiletypeAi",
+        Some("psd") => "BsFiletypePsd",
+        Some("webp" | "ico" | "avif") => "LuImage",
+        // fonts
+        Some("ttf") => "BsFiletypeTtf",
+        Some("otf") => "BsFiletypeOtf",
+        Some("woff" | "woff2") => "BsFiletypeWoff",
+        // media
+        Some("mp3") => "BsFiletypeMp3",
+        Some("wav") => "BsFiletypeWav",
+        Some("aac") => "BsFiletypeAac",
+        Some("m4p" | "m4a") => "BsFiletypeM4p",
+        Some("mp4" | "m4v") => "BsFiletypeMp4",
+        Some("mov") => "BsFiletypeMov",
+        // documents and binaries
+        Some("doc") => "BsFiletypeDoc",
+        Some("docx") => "BsFiletypeDocx",
+        Some("xls") => "BsFiletypeXls",
+        Some("xlsx") => "BsFiletypeXlsx",
+        Some("ppt") => "BsFiletypePpt",
+        Some("pptx") => "BsFiletypePptx",
+        Some("exe" | "dll" | "msi") => "BsFiletypeExe",
+        Some("key" | "pem" | "crt") => "BsFiletypeKey",
         Some("lock") => "VsLock",
         _ => "LuFile",
     }
@@ -78,7 +126,7 @@ mod tests {
     fn kinds_and_extensions() {
         assert_eq!(
             default_icon("File", Some(Path::new("a.tsx"))),
-            "SiTypescript"
+            "BsFiletypeTsx"
         );
         assert_eq!(
             default_icon("File", Some(Path::new("src/main.RS"))),
@@ -90,7 +138,11 @@ mod tests {
         );
         assert_eq!(
             default_icon("File", Some(Path::new("pnpm-lock.yaml"))),
-            "SiYaml"
+            "BsFiletypeYml"
+        );
+        assert_eq!(
+            default_icon("File", Some(Path::new("docs/README.MD"))),
+            "BsFiletypeMd"
         );
         assert_eq!(
             default_icon("File", Some(Path::new("Cargo.lock"))),
@@ -121,8 +173,11 @@ mod tests {
             assert!(is_valid(default_icon(kind, None)), "{kind}");
         }
         for ext in [
-            "ts", "js", "py", "rs", "go", "java", "php", "rb", "md", "json", "yaml", "toml",
-            "html", "css", "sh", "sql", "png", "lock", "bin",
+            "ts", "tsx", "js", "jsx", "py", "rs", "go", "java", "cs", "php", "rb", "sh", "sql",
+            "db", "md", "mdx", "json", "yaml", "toml", "xml", "csv", "html", "css", "scss", "sass",
+            "txt", "pdf", "png", "jpg", "gif", "svg", "bmp", "heic", "tiff", "raw", "ai", "psd",
+            "webp", "ttf", "otf", "woff", "mp3", "wav", "aac", "m4p", "mp4", "mov", "doc", "docx",
+            "xls", "xlsx", "ppt", "pptx", "exe", "key", "lock", "bin",
         ] {
             let p = format!("x.{ext}");
             assert!(is_valid(file_icon(Path::new(&p))), "{ext}");
