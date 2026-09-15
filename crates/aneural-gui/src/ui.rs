@@ -1,7 +1,7 @@
 //! egui panels: top bar, filters, inspector, spores.
 
 use crate::camera::{CanvasRect, FrameRequest, PanGrab, UiCapture};
-use crate::engine::{EngineTx, IndexStatus};
+use crate::engine::IndexStatus;
 use crate::filters::Filters;
 use crate::focus::FocusState;
 use crate::graph::{GraphEdge, GraphNode, GraphState, Hidden};
@@ -10,7 +10,6 @@ use crate::picking::{Hovered, Selection};
 use crate::theme;
 use crate::workspace::WorkspaceRes;
 use aneural_core::NodeId;
-use aneural_engine::EngineCommand;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
@@ -107,7 +106,6 @@ fn panels(
     mut frame: ResMut<FrameRequest>,
     mut layout: ResMut<LayoutParams>,
     mut canvas: ResMut<CanvasRect>,
-    tx: Option<Res<EngineTx>>,
     nodes: Query<(&GraphNode, Has<Hidden>)>,
     edges: Query<&GraphEdge>,
 ) {
@@ -165,15 +163,18 @@ fn panels(
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Reindex (R)").clicked()
-                    && let Some(tx) = &tx
+                if ui
+                    .button("⛶")
+                    .on_hover_text("Fit the whole graph in view (F)")
+                    .clicked()
                 {
-                    let _ = tx.0.send(EngineCommand::Reindex { force: false });
-                }
-                if ui.button("Frame (F)").clicked() {
                     frame.0 = true;
                 }
-                if ui.button("Layout (Space)").clicked() {
+                if ui
+                    .button("🔄")
+                    .on_hover_text("Stir the layout and let it settle again (Space)")
+                    .clicked()
+                {
                     layout.frozen = false;
                 }
             });
