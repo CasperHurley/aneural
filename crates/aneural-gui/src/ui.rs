@@ -7,6 +7,7 @@ use crate::focus::FocusState;
 use crate::graph::{GraphEdge, GraphNode, GraphState, Hidden};
 use crate::layout::LayoutParams;
 use crate::picking::{Hovered, Selection};
+use crate::switch::{OpenRequest, Recents};
 use crate::theme;
 use crate::workspace::WorkspaceRes;
 use aneural_core::NodeId;
@@ -122,6 +123,43 @@ fn gaze_offset(u: f32, seed: u64) -> f32 {
     0.0
 }
 
+/// The workspace name doubles as the menu for opening another one.
+fn workspace_menu(ui: &mut egui::Ui, name: &str, recents: &Recents, request: &mut OpenRequest) {
+    ui.menu_button(egui::RichText::new(format!("{name} ⏷")).strong(), |ui| {
+        if ui.button("Open a folder…").hand().clicked() {
+            if let Some(dir) = rfd::FileDialog::new()
+                .set_title("Open a directory to grow")
+                .pick_folder()
+            {
+                request.0 = Some(dir);
+            }
+            ui.close();
+        }
+        if recents.0.len() > 1 {
+            ui.separator();
+            ui.label(egui::RichText::new("Recent").weak().small());
+            for path in recents.0.iter().skip(1) {
+                let label = path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("/")
+                    .to_string();
+                if ui
+                    .button(label)
+                    .on_hover_text(path.display().to_string())
+                    .hand()
+                    .clicked()
+                {
+                    request.0 = Some(path.clone());
+                    ui.close();
+                }
+            }
+        }
+    })
+    .response
+    .on_hover_text("Open another workspace");
+}
+
 /// The watcher's telltale: a pupil that every few seconds opens into an eye
 /// and closes again, so the status line shows it is awake.
 fn watching_eye(ui: &mut egui::Ui, color: egui::Color32) -> egui::Response {
@@ -212,6 +250,8 @@ fn panels(
     mut layout: ResMut<LayoutParams>,
     mut canvas: ResMut<CanvasRect>,
     mut open: ResMut<PanelsOpen>,
+    mut open_request: ResMut<OpenRequest>,
+    recents: Res<Recents>,
     nodes: Query<(&GraphNode, Has<Hidden>)>,
     edges: Query<&GraphEdge>,
 ) {
@@ -254,7 +294,7 @@ fn panels(
                 open.left = !open.left;
             }
             ui.label(egui::RichText::new("🍄 Aneural").color(accent).strong());
-            ui.label(egui::RichText::new(ws.name()).strong());
+            workspace_menu(ui, &ws.name(), &recents, &mut open_request);
             ui.separator();
             // one indicator with two states: reading files, or idle and watching
             if status.busy {

@@ -48,16 +48,23 @@ impl Plugin for EnginePlugin {
     }
 }
 
-fn spawn_engine(mut commands: Commands, ws: Res<WorkspaceRes>) {
+/// Grow `root` on its own thread; the pair of channels is how the app talks
+/// to it. Used at startup and again whenever another workspace is opened.
+pub fn start_engine(root: &std::path::Path) -> (EngineRx, EngineTx) {
     let (ev_tx, ev_rx) = crossbeam_channel::unbounded::<EngineEvent>();
     let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<EngineCommand>();
-    let root = ws.ws.root().to_path_buf();
+    let root = root.to_path_buf();
     std::thread::Builder::new()
         .name("aneural-engine".into())
         .spawn(move || aneural_engine::run(&root, ev_tx, cmd_rx))
         .expect("spawn engine thread");
-    commands.insert_resource(EngineRx(ev_rx));
-    commands.insert_resource(EngineTx(cmd_tx));
+    (EngineRx(ev_rx), EngineTx(cmd_tx))
+}
+
+fn spawn_engine(mut commands: Commands, ws: Res<WorkspaceRes>) {
+    let (rx, tx) = start_engine(ws.ws.root());
+    commands.insert_resource(rx);
+    commands.insert_resource(tx);
 }
 
 #[allow(clippy::too_many_arguments)]

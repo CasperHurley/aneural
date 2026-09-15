@@ -10,6 +10,7 @@ mod graph;
 mod layout;
 mod picking;
 mod render;
+mod switch;
 mod theme;
 mod ui;
 mod workspace;
@@ -71,6 +72,7 @@ fn main() {
             filters::FiltersPlugin,
             ui::UiPlugin,
             focus::FocusPlugin,
+            switch::SwitchPlugin,
         ))
         .add_systems(
             Update,
