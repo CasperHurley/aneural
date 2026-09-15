@@ -285,18 +285,24 @@ fn panels(
         }
     }
 
-    egui::Panel::top("top").show(ctx, |ui| {
+    // The bar carries the app's name and what it is doing, so it gets room to
+    // breathe rather than egui's default two pixels top and bottom.
+    egui::Panel::top("top")
+        .frame(
+            egui::Frame::side_top_panel(ctx.style())
+                .inner_margin(egui::Margin::symmetric(14, 9)),
+        )
+        .show(ctx, |ui| {
         ui.horizontal(|ui| {
-            if ui
-                .button(if open.left { "⏴" } else { "⏵" })
-                .on_hover_text(if open.left {
-                    "Hide the filters"
-                } else {
-                    "Show the filters"
-                })
-                .clicked()
+            // With the panel open its own corner holds the button; this is
+            // just the way back once it is gone.
+            if !open.left
+                && ui
+                    .button("⏵")
+                    .on_hover_text("Show the filters")
+                    .clicked()
             {
-                open.left = !open.left;
+                open.left = true;
             }
             ui.label(egui::RichText::new("🍄 Aneural").color(accent).strong());
             workspace_menu(ui, &ws.name(), &recents, &mut open_request);
@@ -331,23 +337,21 @@ fn panels(
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .button(if open.right { "⏵" } else { "⏴" })
-                    .on_hover_text(if open.right {
-                        "Hide the inspector"
-                    } else {
-                        "Show the inspector"
-                    })
-                    .clicked()
+                if !open.right
+                    && ui
+                        .button("⏴")
+                        .on_hover_text("Show the inspector")
+                        .clicked()
                 {
-                    open.right = !open.right;
+                    open.right = true;
                 }
             });
         });
     });
 
+    let mut close_left = false;
     egui::Panel::left("filters").resizable(true).default_size(240.0).show_collapsible(ctx, &mut open.left, |ui| {
-        ui.heading("Filters");
+        close_left = panel_header(ui, "Filters", "⏴", "Hide the filters");
         let resp = ui.add(egui::TextEdit::singleline(&mut filters.query).hint_text("search label / path"));
         if resp.changed() {
             filters.dirty = true;
@@ -439,8 +443,9 @@ fn panels(
         });
     });
 
+    let mut close_right = false;
     egui::Panel::right("inspector").resizable(true).default_size(310.0).show_collapsible(ctx, &mut open.right, |ui| {
-        ui.heading("Inspector");
+        close_right = panel_header(ui, "Inspector", "⏵", "Hide the inspector");
         egui::ScrollArea::vertical().show(ui, |ui| {
             let mut select_next: Option<NodeId> = None;
             match selection.primary.clone() {
@@ -542,6 +547,9 @@ fn panels(
         });
     });
 
+    open.left &= !close_left;
+    open.right &= !close_right;
+
     // whatever the panels left over is the graph canvas
     let rect = ctx.available_rect_before_wrap();
 
@@ -569,6 +577,20 @@ fn panels(
         canvas.min = min;
         canvas.max = max;
     }
+}
+
+/// A panel's title with its own collapse button tucked into the far corner.
+/// Returns whether the button was clicked; the caller closes the panel, since
+/// `show_collapsible` holds the flag while the body is running.
+fn panel_header(ui: &mut egui::Ui, title: &str, chevron: &str, tip: &str) -> bool {
+    let mut close = false;
+    ui.horizontal(|ui| {
+        ui.heading(title);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            close = ui.small_button(chevron).on_hover_text(tip).clicked();
+        });
+    });
+    close
 }
 
 fn open_in_editor(path: &std::path::Path) {
