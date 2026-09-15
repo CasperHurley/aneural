@@ -5,7 +5,6 @@ use crate::engine::IndexStatus;
 use crate::filters::Filters;
 use crate::focus::FocusState;
 use crate::graph::{GraphEdge, GraphNode, GraphState, Hidden};
-use crate::layout::LayoutParams;
 use crate::picking::{Hovered, Selection};
 use crate::switch::{OpenRequest, Recents};
 use crate::theme;
@@ -247,7 +246,6 @@ fn panels(
     mut selection: ResMut<Selection>,
     mut focus: ResMut<FocusState>,
     mut frame: ResMut<FrameRequest>,
-    mut layout: ResMut<LayoutParams>,
     mut canvas: ResMut<CanvasRect>,
     mut open: ResMut<PanelsOpen>,
     mut open_request: ResMut<OpenRequest>,
@@ -343,13 +341,6 @@ fn panels(
                     .clicked()
                 {
                     open.right = !open.right;
-                }
-                if ui
-                    .button("🔄")
-                    .on_hover_text("Stir the layout and let it settle again (Space)")
-                    .clicked()
-                {
-                    layout.stir();
                 }
             });
         });
