@@ -2,6 +2,8 @@
 //! `.aneural/nodes/*.json` can add more); these constants are the ones the
 //! engine itself produces.
 
+use std::borrow::Cow;
+
 /// Node kind names. Stored as plain strings in the graph.
 pub struct NodeKind;
 
@@ -81,6 +83,33 @@ impl EdgeKind {
     pub fn is_structural(kind: &str) -> bool {
         matches!(kind, Self::CONTAINS | Self::BELONGS_TO)
     }
+
+    /// Human-readable name for a kind, e.g. `RE_EXPORTS` → "Re-exports".
+    /// Unknown kinds (spores can add their own) are de-screamed generically.
+    pub fn label(kind: &str) -> Cow<'static, str> {
+        match kind {
+            Self::CONTAINS => "Contains".into(),
+            Self::BELONGS_TO => "Belongs to".into(),
+            Self::IMPORTS => "Imports".into(),
+            Self::RE_EXPORTS => "Re-exports".into(),
+            Self::REFERENCES => "References".into(),
+            Self::DEPENDS_ON => "Depends on".into(),
+            Self::ANNOTATES => "Annotates".into(),
+            Self::RELATES_TO => "Relates to".into(),
+            other => Cow::Owned(humanize(other)),
+        }
+    }
+}
+
+/// `SCREAMING_SNAKE` (or anything else) to sentence case: underscores become
+/// spaces and only the first letter is capitalised.
+fn humanize(kind: &str) -> String {
+    let lower = kind.replace('_', " ").to_lowercase();
+    let mut chars = lower.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().chain(chars).collect(),
+        None => lower,
+    }
 }
 
 /// Which producer created a node/edge. Stored in the `source` column so a
@@ -93,5 +122,25 @@ impl Source {
     pub const LANG: &'static str = "lang";
     pub fn spore(name: &str) -> String {
         format!("spore:{name}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EdgeKind;
+
+    #[test]
+    fn edge_labels_are_human_readable() {
+        assert_eq!(EdgeKind::label(EdgeKind::RE_EXPORTS), "Re-exports");
+        assert_eq!(EdgeKind::label(EdgeKind::DEPENDS_ON), "Depends on");
+        assert_eq!(
+            EdgeKind::label("TASTES_LIKE_MUSHROOM"),
+            "Tastes like mushroom"
+        );
+        assert_eq!(EdgeKind::label(""), "");
+        for kind in EdgeKind::ALL {
+            let label = EdgeKind::label(kind);
+            assert!(!label.contains('_'), "{kind} -> {label}");
+        }
     }
 }
