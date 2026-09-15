@@ -60,6 +60,10 @@ impl CanvasRect {
     fn center(&self) -> Vec2 {
         (self.min + self.max) / 2.0
     }
+    /// Is a window-space point (logical pixels, y down) on the canvas?
+    pub fn contains(&self, p: Vec2) -> bool {
+        p.x >= self.min.x && p.x <= self.max.x && p.y >= self.min.y && p.y <= self.max.y
+    }
 }
 
 /// A left-button press that started on empty canvas (a pan, or a click that

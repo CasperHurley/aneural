@@ -12,6 +12,7 @@ use crate::workspace::WorkspaceRes;
 use aneural_core::NodeId;
 use aneural_engine::EngineCommand;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use std::collections::BTreeMap;
 
@@ -52,17 +53,24 @@ fn style_once(mut contexts: EguiContexts, styled: Option<ResMut<Styled>>, mut co
 /// open palm over the background, a closed one while the view is being dragged.
 fn canvas_cursor(
     mut contexts: EguiContexts,
+    canvas: Res<CanvasRect>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     capture: Res<UiCapture>,
     hovered: Res<Hovered>,
     grab: Res<PanGrab>,
     mouse: Res<ButtonInput<MouseButton>>,
 ) {
     // a pan that began on the canvas keeps its cursor even if the drag wanders
-    // over a panel; otherwise egui owns the pointer and its own cursors win
+    // over a panel; otherwise the panels are egui's and its own cursors win
     let panning = grab.active
         || (!capture.pointer
             && (mouse.pressed(MouseButton::Right) || mouse.pressed(MouseButton::Middle)));
-    if capture.pointer && !panning {
+    let over_canvas = windows
+        .single()
+        .ok()
+        .and_then(Window::cursor_position)
+        .is_some_and(|p| canvas.contains(p));
+    if !panning && (!over_canvas || capture.pointer) {
         return;
     }
     let Ok(ctx) = contexts.ctx_mut() else { return };
