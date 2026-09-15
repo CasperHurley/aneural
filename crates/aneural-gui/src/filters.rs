@@ -7,6 +7,10 @@ use aneural_core::NodeId;
 use bevy::prelude::*;
 use std::collections::HashSet;
 
+/// Generous by default: ordinary code structure is well under this, so only a
+/// genuine mesh is thinned out.
+pub const DEFAULT_HUB_LIMIT: u32 = 8;
+
 #[derive(Resource, Debug, Clone)]
 pub struct Filters {
     /// Kinds hidden (empty = show all). Stored as an exclusion set so new kinds default to visible.
@@ -16,6 +20,12 @@ pub struct Filters {
     pub repos: HashSet<NodeId>,
     pub query: String,
     pub show_structural_edges: bool,
+    /// Hide a non-structural link when both of its ends already have more than
+    /// this many links *of that same kind*, so a dense relation reads as a
+    /// cluster instead of a solid mat while a sparse one stays whole. 0 draws
+    /// everything. Hidden links come back the moment either end is hovered or
+    /// selected.
+    pub hub_limit: u32,
     pub focus_mode: bool,
     pub neighborhood_depth: u32,
     pub last_generation: u64,
@@ -30,6 +40,7 @@ impl Default for Filters {
             repos: HashSet::new(),
             query: String::new(),
             show_structural_edges: true,
+            hub_limit: DEFAULT_HUB_LIMIT,
             focus_mode: false,
             neighborhood_depth: 1,
             last_generation: 0,
@@ -41,6 +52,11 @@ impl Default for Filters {
 impl Filters {
     pub fn kind_visible(&self, kind: &str) -> bool {
         !self.hidden_kinds.contains(kind)
+    }
+    /// Is this link one of the ones `hub_limit` thins out? `crowd` is the
+    /// smaller of the two ends' link counts for this kind.
+    pub fn decluttered(&self, kind: &str, crowd: u32) -> bool {
+        kind != "CONTAINS" && self.hub_limit > 0 && crowd > self.hub_limit
     }
     pub fn edge_visible(&self, kind: &str) -> bool {
         if kind == "CONTAINS" && !self.show_structural_edges {

@@ -3,6 +3,7 @@
 use crate::render::{IconAtlas, spawn_node_visuals};
 use crate::workspace::WorkspaceRes;
 use aneural_core::{Edge, GraphDelta, Node, NodeId};
+use bevy::ecs::entity::EntityHashMap;
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -21,8 +22,6 @@ pub struct GraphEdge {
     pub kind: String,
     pub src: Entity,
     pub dst: Entity,
-    pub src_id: NodeId,
-    pub dst_id: NodeId,
     pub seed: u32,
 }
 
@@ -64,11 +63,59 @@ pub struct GraphState {
     pub adjacency: HashMap<NodeId, Vec<(NodeId, String)>>,
     /// Parent (CONTAINS src) per node, for sprouting and gravity.
     pub parent: HashMap<NodeId, NodeId>,
+    /// How many edges touch each node. A hairball is made of nodes with a
+    /// great many links, so both the forces and the renderer read this to
+    /// give the busy ones room and the quiet ones ink.
+    pub degree: EntityHashMap<Degrees>,
     pub node_count: usize,
     pub edge_count: usize,
 }
 
+/// A node's link count, kept both in total and per kind. Density is a
+/// property of one relation at a time: a file with three imports and twenty
+/// mentions is crowded in mentions and perfectly clear in imports.
+#[derive(Default, Debug)]
+pub struct Degrees {
+    pub total: u32,
+    /// A node has a handful of distinct edge kinds at most, so a short list
+    /// beats a map here.
+    by_kind: Vec<(String, u32)>,
+}
+
+impl Degrees {
+    fn bump(&mut self, kind: &str, up: bool) {
+        self.total = if up {
+            self.total + 1
+        } else {
+            self.total.saturating_sub(1)
+        };
+        match self.by_kind.iter_mut().find(|(k, _)| k == kind) {
+            Some((_, n)) => *n = if up { *n + 1 } else { n.saturating_sub(1) },
+            None if up => self.by_kind.push((kind.to_string(), 1)),
+            None => {}
+        }
+    }
+
+    pub fn of_kind(&self, kind: &str) -> u32 {
+        self.by_kind
+            .iter()
+            .find(|(k, _)| k == kind)
+            .map(|(_, n)| *n)
+            .unwrap_or(0)
+    }
+}
+
 impl GraphState {
+    /// Every link touching a node, whatever the kind.
+    pub fn degree_of(&self, e: Entity) -> u32 {
+        self.degree.get(&e).map(|d| d.total).unwrap_or(0)
+    }
+
+    /// Links of one kind touching a node.
+    pub fn kind_degree(&self, e: Entity, kind: &str) -> u32 {
+        self.degree.get(&e).map(|d| d.of_kind(kind)).unwrap_or(0)
+    }
+
     pub fn neighbors(&self, id: &NodeId) -> &[(NodeId, String)] {
         self.adjacency.get(id).map(Vec::as_slice).unwrap_or(&[])
     }
@@ -240,6 +287,7 @@ fn remove_node(commands: &mut Commands, graph: &mut GraphState, id: &NodeId) {
     for k in keys {
         remove_edge(commands, graph, &k);
     }
+    graph.degree.remove(&entity);
     graph.adjacency.remove(id);
     graph.parent.remove(id);
     graph.pending_edges.retain(|e| &e.src != id && &e.dst != id);
@@ -268,8 +316,6 @@ fn add_edge(commands: &mut Commands, graph: &mut GraphState, edge: Edge) {
                 kind: edge.kind.clone(),
                 src: s,
                 dst: d,
-                src_id: edge.src.clone(),
-                dst_id: edge.dst.clone(),
                 seed,
             },
             GrowIn { t: 0.0, dur: 0.6 },
@@ -289,6 +335,9 @@ fn add_edge(commands: &mut Commands, graph: &mut GraphState, edge: Edge) {
         graph.parent.insert(edge.dst.clone(), edge.src.clone());
     }
     graph.edges.insert(key, entity);
+    for end in [s, d] {
+        graph.degree.entry(end).or_default().bump(&edge.kind, true);
+    }
     graph.edge_count += 1;
 }
 
@@ -297,6 +346,13 @@ fn remove_edge(commands: &mut Commands, graph: &mut GraphState, key: &EdgeKey) {
         return;
     };
     let (kind, src, dst) = key;
+    for id in [src, dst] {
+        if let Some(e) = graph.by_id.get(id).copied()
+            && let Some(d) = graph.degree.get_mut(&e)
+        {
+            d.bump(kind, false);
+        }
+    }
     if let Some(v) = graph.adjacency.get_mut(src) {
         v.retain(|(n, k)| !(n == dst && k == kind));
     }

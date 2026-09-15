@@ -276,8 +276,15 @@ fn panels(
         }
     }
     let mut edge_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut decluttered = 0usize;
     for e in &edges {
         *edge_counts.entry(e.kind.clone()).or_default() += 1;
+        let crowd = graph
+            .kind_degree(e.src, &e.kind)
+            .min(graph.kind_degree(e.dst, &e.kind));
+        if filters.decluttered(&e.kind, crowd) {
+            decluttered += 1;
+        }
     }
 
     egui::Panel::top("top").show(ctx, |ui| {
@@ -394,6 +401,17 @@ fn panels(
                     }
                 });
             }
+            ui.separator();
+            ui.label(egui::RichText::new("Declutter").strong());
+            let mut limit = filters.hub_limit;
+            if ui.add(egui::Slider::new(&mut limit, 0..=64).text("hub links").custom_formatter(|v, _| if v < 1.0 { "off".into() } else { format!("{v:.0}") })).hand().changed() {
+                filters.hub_limit = limit;
+            }
+            ui.label(egui::RichText::new(if decluttered > 0 {
+                format!("{decluttered} links between busy nodes hidden — hover or select either end to see them")
+            } else {
+                "every link is drawn".into()
+            }).weak().small());
             ui.separator();
             ui.label(egui::RichText::new("Repos").strong());
             let mut repos: Vec<(NodeId, String)> = nodes.iter().filter(|(n, _)| n.kind == "Repo").map(|(n, _)| (n.id.clone(), n.path.clone().unwrap_or_else(|| n.label.clone()))).collect();

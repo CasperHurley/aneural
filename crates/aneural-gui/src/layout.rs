@@ -100,11 +100,22 @@ fn step(
     }
     // A thousand nodes need more room than a hundred: stretch the rest lengths
     // and push harder, so a big workspace spreads instead of balling up.
-    let spread = (n as f32 / 120.0).sqrt().clamp(1.0, 3.0);
+    let spread = (n as f32 / 120.0).sqrt().clamp(1.0, 6.0);
     let index: HashMap<Entity, usize> = snapshot
         .iter()
         .enumerate()
         .map(|(i, (e, ..))| (*e, i))
+        .collect();
+    // A node's links are its crowd. A well-connected one needs a wider berth
+    // than a leaf, or its neighbours pile into it and the whole cluster knots.
+    let degree: Vec<f32> = snapshot
+        .iter()
+        .map(|(e, ..)| graph.degree_of(*e).max(1) as f32)
+        .collect();
+    let charge: Vec<f32> = snapshot
+        .iter()
+        .zip(&degree)
+        .map(|((_, _, m, _), d)| m * (1.0 + d).sqrt().min(4.0))
         .collect();
     let mut force = vec![Vec2::ZERO; n];
 
@@ -129,9 +140,9 @@ fn step(
                 return;
             }
             // symmetric in (i, j) so the pair exerts no net force or torque
-            let f =
-                params.repulsion * spread * spread * (snapshot[i].2 * snapshot[j].2).sqrt() / dist2;
-            force[i] += d.normalize_or_zero() * f.min(60.0 * spread);
+            let pair = (charge[i] * charge[j]).sqrt();
+            let f = params.repulsion * spread * spread * pair / dist2;
+            force[i] += d.normalize_or_zero() * f.min(60.0 * spread * pair.clamp(1.0, 3.0));
         };
         if use_grid {
             let cx = (pi.x / cell).floor() as i32;
@@ -160,14 +171,23 @@ fn step(
         let d = snapshot[j].1 - snapshot[i].1;
         let dist = d.length().max(0.01);
         let stretch = dist - rest_length(&e.kind) * spread;
-        let f = d / dist * (stretch * params.spring).clamp(-30.0, 30.0);
-        force[i] += f;
-        force[j] -= f;
+        // A link between two busy nodes is one of hundreds they each have, so
+        // it pulls proportionally less; a leaf's one link still pulls in full.
+        // Without this the dense corner of a codebase collapses into a knot no
+        // amount of repulsion can open again.
+        let weight = 1.0 / degree[i].min(degree[j]);
+        let f = d / dist * (stretch * params.spring * weight).clamp(-30.0, 30.0);
+        // The busier end holds its ground and the quieter end does the moving,
+        // so hubs stay put and their neighbours arrange themselves around.
+        let bias = degree[i] / (degree[i] + degree[j]);
+        force[i] += f * (1.0 - bias);
+        force[j] -= f * bias;
         if e.kind == "CONTAINS" {
             // child and parent are pulled gently together (equal and opposite,
             // so the tree does not pick up angular momentum)
-            force[j] -= d * params.gravity;
-            force[i] += d * params.gravity;
+            let g = params.gravity / spread;
+            force[j] -= d * g;
+            force[i] += d * g;
         }
     }
 
@@ -232,18 +252,27 @@ fn step(
         vel.0 = v;
         energy += v.length_squared();
     }
-    params.alpha *= 1.0 - params.alpha_decay;
+    // A big graph has much further to travel before it is arranged, so it
+    // gets proportionally longer to do it in. Cooling still guarantees it
+    // stops; it just stops somewhere it has actually finished unfolding.
+    let decay = params.alpha_decay * (120.0 / n as f32).sqrt().clamp(0.2, 1.0);
+    params.alpha *= 1.0 - decay;
     // cold, or still: either way it has arrived
     if params.alpha < 0.02 || energy / (n as f32) < params.epsilon {
         params.frozen = true;
+        let (lo, hi) = snapshot.iter().fold(
+            (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)),
+            |(lo, hi), s| (lo.min(s.1), hi.max(s.1)),
+        );
         debug!(
-            "layout settled ({n} nodes, alpha {:.3}, energy/n {:.3})",
+            "layout settled ({n} nodes, alpha {:.3}, energy/n {:.3}, extent {:.0}x{:.0})",
             params.alpha,
-            energy / (n as f32)
+            energy / (n as f32),
+            hi.x - lo.x,
+            hi.y - lo.y
         );
         for (_, _, mut vel, ..) in &mut nodes {
             vel.0 = Vec2::ZERO;
         }
     }
-    let _ = &graph;
 }
