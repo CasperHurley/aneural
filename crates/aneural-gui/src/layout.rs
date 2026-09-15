@@ -14,8 +14,26 @@ pub struct LayoutParams {
     pub damping: f32,
     pub max_speed: f32,
     pub epsilon: f32,
+    /// How hard the forces push, 1 down to nothing. Every tick cools it a
+    /// little, so the layout always arrives somewhere instead of boiling.
+    pub alpha: f32,
+    pub alpha_decay: f32,
     pub frozen: bool,
     pub last_generation: u64,
+}
+
+impl LayoutParams {
+    /// Reheat: the graph rearranges from wherever it is and settles again.
+    pub fn stir(&mut self) {
+        self.frozen = false;
+        self.alpha = 1.0;
+    }
+
+    /// Just warm enough to follow a dragged node without flinging the rest.
+    pub fn nudge(&mut self) {
+        self.frozen = false;
+        self.alpha = self.alpha.max(0.3);
+    }
 }
 
 impl Default for LayoutParams {
@@ -28,6 +46,8 @@ impl Default for LayoutParams {
             damping: 0.85,
             max_speed: 40.0,
             epsilon: 0.15,
+            alpha: 1.0,
+            alpha_decay: 0.022,
             frozen: false,
             last_generation: 0,
         }
@@ -64,7 +84,7 @@ fn step(
 ) {
     if status.generation != params.last_generation {
         params.last_generation = status.generation;
-        params.frozen = false;
+        params.stir();
     }
     if params.frozen {
         return;
@@ -136,7 +156,7 @@ fn step(
         let d = snapshot[j].1 - snapshot[i].1;
         let dist = d.length().max(0.01);
         let stretch = dist - rest_length(&e.kind);
-        let f = d / dist * stretch * params.spring;
+        let f = d / dist * (stretch * params.spring).clamp(-30.0, 30.0);
         force[i] += f;
         force[j] -= f;
         if e.kind == "CONTAINS" {
@@ -160,7 +180,7 @@ fn step(
             continue; // pinned
         }
         let vel = nodes.get(s.0).map(|(_, _, v, ..)| v.0).unwrap_or_default();
-        let mut v = (vel + force[i]) * params.damping;
+        let mut v = (vel + force[i] * params.alpha) * params.damping;
         if v.length() > params.max_speed {
             v = v.normalize() * params.max_speed;
         }
@@ -208,9 +228,15 @@ fn step(
         vel.0 = v;
         energy += v.length_squared();
     }
-    if energy / (n as f32) < params.epsilon {
+    params.alpha *= 1.0 - params.alpha_decay;
+    // cold, or still: either way it has arrived
+    if params.alpha < 0.02 || energy / (n as f32) < params.epsilon {
         params.frozen = true;
-        debug!("layout settled ({n} nodes)");
+        debug!(
+            "layout settled ({n} nodes, alpha {:.3}, energy/n {:.3})",
+            params.alpha,
+            energy / (n as f32)
+        );
         for (_, _, mut vel, ..) in &mut nodes {
             vel.0 = Vec2::ZERO;
         }

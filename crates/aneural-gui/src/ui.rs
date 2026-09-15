@@ -309,7 +309,7 @@ fn panels(
                     .on_hover_text("Stir the layout and let it settle again (Space)")
                     .clicked()
                 {
-                    layout.frozen = false;
+                    layout.stir();
                 }
             });
         });

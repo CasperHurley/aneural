@@ -186,7 +186,7 @@ fn hotkeys(
         frame.0 = true;
     }
     if keys.just_pressed(KeyCode::Space) {
-        layout.frozen = false;
+        layout.stir();
     }
     if keys.just_pressed(KeyCode::KeyR)
         && let Some(tx) = tx

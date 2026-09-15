@@ -106,7 +106,7 @@ pub fn pick(
                 }
                 pos.0 = target;
                 vel.0 = Vec2::ZERO;
-                layout.frozen = false;
+                layout.nudge();
             }
             return;
         }
