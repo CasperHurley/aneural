@@ -1,0 +1,44 @@
+[package]
+name = "aneural-gui"
+description = "Aneural desktop app: a living mycelium graph of your workspace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "aneural-gui"
+path = "src/main.rs"
+
+[features]
+default = []
+dev = ["bevy/dynamic_linking"]
+
+[dependencies]
+aneural-core.workspace = true
+aneural-engine.workspace = true
+aneural-store.workspace = true
+aneural-icons = { workspace = true, features = ["raster"] }
+bevy = { workspace = true, features = [
+  "2d",
+  "bevy_winit",
+  "bevy_window",
+  "bevy_text",
+  "default_font",
+  "bevy_ui",
+  "multi_threaded",
+  "bevy_log",
+  "png",
+  "bevy_gizmos",
+  "bevy_gizmos_render",
+] }
+bevy_egui.workspace = true
+bevy_pancam.workspace = true
+rfd.workspace = true
+crossbeam-channel.workspace = true
+petgraph.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tracing.workspace = true

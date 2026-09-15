@@ -1,0 +1,22 @@
+[package]
+name = "aneural-icons"
+description = "Curated icondata registry and rasterizer for Aneural node icons"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+raster = ["dep:resvg", "dep:usvg", "dep:tiny-skia"]
+
+[dependencies]
+icondata_core.workspace = true
+icondata_lu.workspace = true
+icondata_si.workspace = true
+icondata_vs.workspace = true
+resvg = { workspace = true, optional = true }
+usvg = { workspace = true, optional = true }
+tiny-skia = { workspace = true, optional = true }
+thiserror.workspace = true

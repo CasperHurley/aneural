@@ -1,0 +1,19 @@
+# rust
+/target/
+# node
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+# native addon artifacts
+*.node
+packages/core/index.js
+packages/core/index.d.ts
+# aneural workspace caches
+.aneural/cache/
+.aneural/state/layout.json
+# os / editors
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

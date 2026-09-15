@@ -1,0 +1,87 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/aneural/aneural"
+authors = ["Aneural contributors"]
+
+[workspace.dependencies]
+# internal
+aneural-core = { path = "crates/aneural-core" }
+aneural-store = { path = "crates/aneural-store" }
+aneural-lang = { path = "crates/aneural-lang" }
+aneural-engine = { path = "crates/aneural-engine" }
+aneural-icons = { path = "crates/aneural-icons" }
+
+# general
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+thiserror = "2"
+anyhow = "1"
+blake3 = "1.8"
+crossbeam-channel = "0.5"
+regex = "1"
+semver = "1"
+toml = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tempfile = "3"
+time = { version = "0.3", features = ["formatting", "parsing"] }
+
+# storage / fs
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+notify = "8.2"
+notify-debouncer-full = "0.7"
+ignore = "0.4.33"
+globset = "0.4.20"
+petgraph = "0.8"
+
+# language analysis (exact pins: tree-sitter ABI compatibility)
+tree-sitter = "=0.27.0"
+streaming-iterator = "0.1"
+tree-sitter-typescript = "=0.23.2"
+tree-sitter-javascript = "=0.25.0"
+tree-sitter-python = "=0.25.0"
+tree-sitter-rust = "=0.24.2"
+tree-sitter-go = "=0.25.0"
+tree-sitter-java = "=0.23.5"
+tree-sitter-php = "=0.24.2"
+tree-sitter-ruby = "=0.23.1"
+oxc_resolver = "11.24"
+
+# icons
+icondata_core = "0.1"
+icondata_lu = "0.1"
+icondata_si = "0.1"
+icondata_vs = "0.1"
+resvg = { version = "0.48", default-features = false }
+usvg = { version = "0.48", default-features = false }
+tiny-skia = "0.12"
+
+# node addon
+napi = { version = "3.12", features = ["napi9", "serde-json"] }
+napi-derive = "3.6"
+napi-build = "2.4"
+
+# gui
+bevy = { version = "0.19.1", default-features = false }
+bevy_egui = "0.42"
+bevy_pancam = "0.21"
+rfd = "0.17"
+
+# Faster iteration for the Bevy binary: optimize deps, keep our code debuggable.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
