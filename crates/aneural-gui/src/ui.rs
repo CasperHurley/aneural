@@ -1,12 +1,12 @@
 //! egui panels: top bar, filters, inspector, spores.
 
-use crate::camera::{CanvasRect, FrameRequest};
+use crate::camera::{CanvasRect, FrameRequest, PanGrab, UiCapture};
 use crate::engine::{EngineTx, IndexStatus};
 use crate::filters::Filters;
 use crate::focus::FocusState;
 use crate::graph::{GraphEdge, GraphNode, GraphState, Hidden};
 use crate::layout::LayoutParams;
-use crate::picking::Selection;
+use crate::picking::{Hovered, Selection};
 use crate::theme;
 use crate::workspace::WorkspaceRes;
 use aneural_core::NodeId;
@@ -19,8 +19,10 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(EguiPlugin::default())
-            .add_systems(EguiPrimaryContextPass, (style_once, panels).chain());
+        app.add_plugins(EguiPlugin::default()).add_systems(
+            EguiPrimaryContextPass,
+            (style_once, panels, canvas_cursor).chain(),
+        );
     }
 }
 
@@ -40,8 +42,37 @@ fn style_once(mut contexts: EguiContexts, styled: Option<ResMut<Styled>>, mut co
     visuals.hyperlink_color = theme::egui_hex(theme::ACCENT);
     visuals.widgets.active.bg_fill = theme::egui_hex(theme::DIM);
     visuals.widgets.hovered.bg_fill = theme::egui_hex("#1c2a22");
+    // a hand over anything clickable, the way a web app behaves
+    visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
     ctx.set_visuals(visuals);
     commands.insert_resource(Styled(true));
+}
+
+/// The canvas is not egui, so it sets its own cursor: a hand over a node, an
+/// open palm over the background, a closed one while the view is being dragged.
+fn canvas_cursor(
+    mut contexts: EguiContexts,
+    capture: Res<UiCapture>,
+    hovered: Res<Hovered>,
+    grab: Res<PanGrab>,
+    mouse: Res<ButtonInput<MouseButton>>,
+) {
+    // a pan that began on the canvas keeps its cursor even if the drag wanders
+    // over a panel; otherwise egui owns the pointer and its own cursors win
+    let panning = grab.active
+        || (!capture.pointer
+            && (mouse.pressed(MouseButton::Right) || mouse.pressed(MouseButton::Middle)));
+    if capture.pointer && !panning {
+        return;
+    }
+    let Ok(ctx) = contexts.ctx_mut() else { return };
+    ctx.set_cursor_icon(if panning {
+        egui::CursorIcon::Grabbing
+    } else if hovered.0.is_some() {
+        egui::CursorIcon::PointingHand
+    } else {
+        egui::CursorIcon::Grab
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -153,16 +184,17 @@ fn panels(
             ui.separator();
             ui.label(egui::RichText::new("Edge kinds").strong());
             let mut structural = filters.show_structural_edges;
-            if ui.checkbox(&mut structural, format!("structural (CONTAINS) ({})", edge_counts.get("CONTAINS").copied().unwrap_or(0))).changed() {
+            if ui.checkbox(&mut structural, format!("Contains (folder tree) ({})", edge_counts.get("CONTAINS").copied().unwrap_or(0))).changed() {
                 filters.show_structural_edges = structural;
                 filters.dirty = true;
             }
             for kind in aneural_core::kinds::EdgeKind::ALL.iter().filter(|k| **k != "CONTAINS") {
                 let mut on = !filters.hidden_edge_kinds.contains(*kind);
+                let label = aneural_core::kinds::EdgeKind::label(kind);
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 4.0), egui::Sense::hover());
                     ui.painter().rect_filled(rect, 1.0, theme::egui_color(theme::edge_color(kind)));
-                    if ui.checkbox(&mut on, format!("{kind} ({})", edge_counts.get(*kind).copied().unwrap_or(0))).changed() {
+                    if ui.checkbox(&mut on, format!("{label} ({})", edge_counts.get(*kind).copied().unwrap_or(0))).changed() {
                         filters.toggle_edge_kind(kind);
                     }
                 });
@@ -275,7 +307,8 @@ fn panels(
                                 let label = nodes.iter().find(|(x, _)| x.id == other).map(|(x, _)| x.label.clone()).unwrap_or_else(|| other.to_string());
                                 let arrow = if outgoing { "→" } else { "←" };
                                 ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(format!("{arrow} {kind}")).color(theme::egui_color(theme::edge_color(&kind))).small());
+                                    let name = aneural_core::kinds::EdgeKind::label(&kind);
+                                    ui.label(egui::RichText::new(format!("{arrow} {name}")).color(theme::egui_color(theme::edge_color(&kind))).small());
                                     if ui.link(label).clicked() {
                                         select_next = Some(other.clone());
                                     }
