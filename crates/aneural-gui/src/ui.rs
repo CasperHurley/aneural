@@ -60,16 +60,69 @@ fn style_once(mut contexts: EguiContexts, styled: Option<ResMut<Styled>>, mut co
     commands.insert_resource(Styled(true));
 }
 
+/// splitmix64's finaliser: turns a counter into well-spread bits, so "every
+/// so often" does not fall into a visible pattern.
+fn mix(n: u64) -> u64 {
+    let mut h = n.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    h ^= h >> 29;
+    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    h ^= h >> 32;
+    h
+}
+
+/// Where the pupil sits during a glance, over `u` in 0..1 of the open eye:
+/// a wait, a dart to one side, a pause, a dart across, a pause, and back to
+/// the middle. The waits and the side it looks first vary with the cycle.
+fn gaze_offset(u: f32, seed: u64) -> f32 {
+    let byte = |shift: u32| ((seed >> shift) & 0xFF) as f32 / 255.0;
+    let delay = 0.08 + 0.22 * byte(8);
+    let hold = 0.10 + 0.20 * byte(16);
+    let dart = 0.10;
+    let side = if (seed >> 24) & 1 == 0 { 2.6 } else { -2.6 };
+    let mut keys = [
+        (0.0, 0.0),
+        (delay, 0.0),
+        (delay + dart, side),
+        (delay + dart + hold, side),
+        (delay + 2.0 * dart + hold, -side),
+        (delay + 2.0 * dart + 2.0 * hold, -side),
+        (delay + 3.0 * dart + 2.0 * hold, 0.0),
+    ];
+    // squeeze the whole sequence back inside the blink if the waits ran long
+    let squeeze = (0.95 / keys[keys.len() - 1].0).min(1.0);
+    for k in &mut keys {
+        k.0 *= squeeze;
+    }
+    let mut prev = keys[0];
+    for &k in &keys[1..] {
+        if u <= k.0 {
+            let x = ((u - prev.0) / (k.0 - prev.0).max(1e-4)).clamp(0.0, 1.0);
+            return prev.1 + (k.1 - prev.1) * x * x * (3.0 - 2.0 * x);
+        }
+        prev = k;
+    }
+    0.0
+}
+
 /// The watcher's telltale: a pupil that every few seconds opens into an eye
 /// and closes again, so the status line shows it is awake.
 fn watching_eye(ui: &mut egui::Ui, color: egui::Color32) -> egui::Response {
     const CYCLE: f64 = 5.0;
-    const BLINK: f64 = 1.3;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(16.0, 12.0), egui::Sense::hover());
-    let phase = ui.input(|i| i.time) % CYCLE;
+    let time = ui.input(|i| i.time);
+    let (cycle, phase) = ((time / CYCLE) as u64, time % CYCLE);
+    // on some cycles the eye has a look around, and stays open long enough for it
+    let seed = mix(cycle);
+    let glances = seed.is_multiple_of(3);
+    let blink = if glances { 2.4 } else { 1.3 };
     // one smooth open-and-shut at the top of each cycle
-    let open = if phase < BLINK {
-        (std::f64::consts::PI * phase / BLINK).sin() as f32
+    let open = if phase < blink {
+        (std::f64::consts::PI * phase / blink).sin() as f32
+    } else {
+        0.0
+    };
+    let gaze = if glances && open > 0.0 {
+        gaze_offset((phase / blink) as f32, seed)
     } else {
         0.0
     };
@@ -90,7 +143,7 @@ fn watching_eye(ui: &mut egui::Ui, color: egui::Color32) -> egui::Response {
         painter.add(egui::Shape::line(lid(-1.0), stroke));
         painter.add(egui::Shape::line(lid(1.0), stroke));
     }
-    painter.circle_filled(c, 3.0 - 1.0 * open, color);
+    painter.circle_filled(c + egui::vec2(gaze, 0.0), 3.0 - 1.0 * open, color);
     resp
 }
 
