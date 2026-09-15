@@ -148,9 +148,14 @@ fn panels(
             } else {
                 "Grown".to_string()
             };
-            ui.label(phase);
+            ui.label(phase).on_hover_text(if status.complete {
+                "Every file in the workspace has been read into the graph."
+            } else {
+                "Reading the workspace: files, imports and spores."
+            });
             if status.watching {
-                ui.label(egui::RichText::new("● watching").color(accent));
+                ui.label(egui::RichText::new("⏺ watching").color(accent))
+                    .on_hover_text("Files you add, edit or delete are picked up on their own.");
             }
             ui.label(format!(
                 "{} nodes · {} edges",
