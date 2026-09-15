@@ -15,7 +15,7 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use bevy_egui::EguiContexts;
+use bevy_egui::{EguiContexts, PrimaryEguiContext};
 use bevy_pancam::{PanCam, PanCamPlugin, PanCamSystems};
 
 const MIN_SCALE: f32 = 0.15;
@@ -26,13 +26,14 @@ const PAN_DEADZONE: f32 = 4.0;
 #[derive(Component)]
 pub struct MainCamera;
 
-/// Second pass over the same view. 2D gizmos are always queued last, so the
-/// hyphae would paint over the nodes; instead the main camera draws only the
-/// gizmo layer and this one redraws the nodes on top of them.
+/// An earlier pass over the same view, holding only the hyphae. 2D gizmos are
+/// always queued last within a pass, so edges drawn alongside the nodes would
+/// paint over them; giving the hyphae their own earlier camera puts them
+/// underneath, and leaves the main pass — and so egui's panels — on top.
 #[derive(Component)]
-pub struct NodeCamera;
+pub struct HyphaeCamera;
 
-/// The render layer the hyphae gizmos live on (the main camera's own).
+/// The render layer the hyphae gizmos and their camera live on.
 pub const HYPHAE_LAYER: usize = 1;
 
 #[derive(Resource, Default)]
@@ -103,7 +104,7 @@ impl Plugin for CameraPlugin {
                     (gate_pancam, hotkeys)
                         .after(crate::picking::pick)
                         .before(PanCamSystems),
-                    (frame_all, follow_graph, sync_node_camera)
+                    (frame_all, follow_graph, sync_hyphae_camera)
                         .chain()
                         .after(PanCamSystems),
                 ),
@@ -112,10 +113,17 @@ impl Plugin for CameraPlugin {
 }
 
 fn spawn_camera(mut commands: Commands) {
+    // The node pass goes last and carries egui, so the panels stay on top of
+    // everything; bevy_egui claims the first camera it sees, hence the order.
     commands.spawn((
         MainCamera,
+        PrimaryEguiContext,
         Camera2d,
-        RenderLayers::layer(HYPHAE_LAYER),
+        Camera {
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+        RenderLayers::layer(0),
         PanCam {
             grab_buttons: vec![MouseButton::Left, MouseButton::Right, MouseButton::Middle],
             zoom_to_cursor: true,
@@ -125,21 +133,20 @@ fn spawn_camera(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        NodeCamera,
+        HyphaeCamera,
         Camera2d,
         Camera {
-            order: 1,
-            clear_color: ClearColorConfig::None,
+            order: -1,
             ..default()
         },
-        RenderLayers::layer(0),
+        RenderLayers::layer(HYPHAE_LAYER),
     ));
 }
 
-/// Keep the node pass looking through the same lens as the main camera.
-fn sync_node_camera(
-    main: Query<(&Transform, &Projection), (With<MainCamera>, Without<NodeCamera>)>,
-    mut overlay: Query<(&mut Transform, &mut Projection), With<NodeCamera>>,
+/// Keep the hyphae pass looking through the same lens as the main camera.
+fn sync_hyphae_camera(
+    main: Query<(&Transform, &Projection), (With<MainCamera>, Without<HyphaeCamera>)>,
+    mut overlay: Query<(&mut Transform, &mut Projection), With<HyphaeCamera>>,
 ) {
     let (Ok((t, p)), Ok((mut ot, mut op))) = (main.single(), overlay.single_mut()) else {
         return;
