@@ -27,6 +27,18 @@ impl Plugin for UiPlugin {
     }
 }
 
+/// egui honours `Visuals::interact_cursor` for buttons only, so every other
+/// clickable widget asks for the hand itself.
+trait Hand {
+    fn hand(self) -> Self;
+}
+
+impl Hand for egui::Response {
+    fn hand(self) -> Self {
+        self.on_hover_cursor(egui::CursorIcon::PointingHand)
+    }
+}
+
 #[derive(Resource, Default)]
 struct Styled(bool);
 
@@ -184,7 +196,7 @@ fn panels(
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
                     ui.painter().circle_filled(rect.center(), 5.0, theme::egui_color(style.color));
-                    if ui.checkbox(&mut on, format!("{} ({shown}/{total})", style.label)).changed() {
+                    if ui.checkbox(&mut on, format!("{} ({shown}/{total})", style.label)).hand().changed() {
                         filters.toggle_kind(&kind);
                     }
                 });
@@ -192,7 +204,7 @@ fn panels(
             ui.separator();
             ui.label(egui::RichText::new("Edge kinds").strong());
             let mut structural = filters.show_structural_edges;
-            if ui.checkbox(&mut structural, format!("Contains (folder tree) ({})", edge_counts.get("CONTAINS").copied().unwrap_or(0))).changed() {
+            if ui.checkbox(&mut structural, format!("Contains (folder tree) ({})", edge_counts.get("CONTAINS").copied().unwrap_or(0))).hand().changed() {
                 filters.show_structural_edges = structural;
                 filters.dirty = true;
             }
@@ -202,7 +214,7 @@ fn panels(
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 4.0), egui::Sense::hover());
                     ui.painter().rect_filled(rect, 1.0, theme::egui_color(theme::edge_color(kind)));
-                    if ui.checkbox(&mut on, format!("{label} ({})", edge_counts.get(*kind).copied().unwrap_or(0))).changed() {
+                    if ui.checkbox(&mut on, format!("{label} ({})", edge_counts.get(*kind).copied().unwrap_or(0))).hand().changed() {
                         filters.toggle_edge_kind(kind);
                     }
                 });
@@ -216,7 +228,7 @@ fn panels(
             }
             for (id, path) in repos {
                 let mut on = filters.repos.is_empty() || filters.repos.contains(&id);
-                if ui.checkbox(&mut on, path).changed() {
+                if ui.checkbox(&mut on, path).hand().changed() {
                     let all: Vec<NodeId> = nodes.iter().filter(|(n, _)| n.kind == "Repo").map(|(n, _)| n.id.clone()).collect();
                     if filters.repos.is_empty() {
                         filters.repos = all.into_iter().collect();
@@ -236,12 +248,12 @@ fn panels(
             ui.separator();
             ui.label(egui::RichText::new("Focus").strong());
             let mut fm = filters.focus_mode;
-            if ui.checkbox(&mut fm, "focus mode (selection + neighbours only)").changed() {
+            if ui.checkbox(&mut fm, "focus mode (selection + neighbours only)").hand().changed() {
                 filters.focus_mode = fm;
                 filters.dirty = true;
             }
             let mut depth = filters.neighborhood_depth;
-            if ui.add(egui::Slider::new(&mut depth, 0..=4).text("depth")).changed() {
+            if ui.add(egui::Slider::new(&mut depth, 0..=4).text("depth")).hand().changed() {
                 filters.neighborhood_depth = depth;
                 filters.dirty = true;
             }
