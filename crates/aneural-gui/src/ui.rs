@@ -77,7 +77,7 @@ fn gaze_offset(u: f32, seed: u64) -> f32 {
     let byte = |shift: u32| ((seed >> shift) & 0xFF) as f32 / 255.0;
     let delay = 0.08 + 0.22 * byte(8);
     let hold = 0.10 + 0.20 * byte(16);
-    let dart = 0.10;
+    let dart = 0.11;
     let side = if (seed >> 24) & 1 == 0 { 2.6 } else { -2.6 };
     let mut keys = [
         (0.0, 0.0),
@@ -107,14 +107,14 @@ fn gaze_offset(u: f32, seed: u64) -> f32 {
 /// The watcher's telltale: a pupil that every few seconds opens into an eye
 /// and closes again, so the status line shows it is awake.
 fn watching_eye(ui: &mut egui::Ui, color: egui::Color32) -> egui::Response {
-    const CYCLE: f64 = 5.0;
+    const CYCLE: f64 = 6.5;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(16.0, 12.0), egui::Sense::hover());
     let time = ui.input(|i| i.time);
     let (cycle, phase) = ((time / CYCLE) as u64, time % CYCLE);
     // on some cycles the eye has a look around, and stays open long enough for it
     let seed = mix(cycle);
     let glances = seed.is_multiple_of(3);
-    let blink = if glances { 2.4 } else { 1.3 };
+    let blink = if glances { 3.4 } else { 1.9 };
     // one smooth open-and-shut at the top of each cycle
     let open = if phase < blink {
         (std::f64::consts::PI * phase / blink).sin() as f32
