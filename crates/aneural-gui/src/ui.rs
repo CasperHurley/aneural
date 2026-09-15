@@ -345,13 +345,6 @@ fn panels(
                     open.right = !open.right;
                 }
                 if ui
-                    .button("⛶")
-                    .on_hover_text("Fit the whole graph in view (F)")
-                    .clicked()
-                {
-                    frame.0 = true;
-                }
-                if ui
                     .button("🔄")
                     .on_hover_text("Stir the layout and let it settle again (Space)")
                     .clicked()
@@ -560,6 +553,23 @@ fn panels(
 
     // whatever the panels left over is the graph canvas
     let rect = ctx.available_rect_before_wrap();
+
+    // Fitting the view is an act on the canvas, so the control lives on it:
+    // tucked into the bottom corner of whatever the panels left over.
+    let size = egui::vec2(30.0, 30.0);
+    egui::Area::new("canvas tools".into())
+        .order(egui::Order::Foreground)
+        .fixed_pos(rect.max - size - egui::vec2(12.0, 12.0))
+        .show(&ctx.ctx().clone(), |ui| {
+            if ui
+                .add_sized(size, egui::Button::new(egui::RichText::new("⛶").size(15.0)))
+                .on_hover_text("Fit the whole graph in view (F)")
+                .clicked()
+            {
+                frame.0 = true;
+            }
+        });
+
     let (min, max) = (
         Vec2::new(rect.min.x, rect.min.y),
         Vec2::new(rect.max.x, rect.max.y),
