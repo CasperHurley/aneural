@@ -19,10 +19,28 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(EguiPlugin::default()).add_systems(
-            EguiPrimaryContextPass,
-            (style_once, panels, canvas_cursor).chain(),
-        );
+        app.add_plugins(EguiPlugin::default())
+            .init_resource::<PanelsOpen>()
+            .add_systems(
+                EguiPrimaryContextPass,
+                (style_once, panels, canvas_cursor).chain(),
+            );
+    }
+}
+
+/// Which side panels are showing. Collapsing one hands its width to the canvas.
+#[derive(Resource)]
+pub struct PanelsOpen {
+    pub left: bool,
+    pub right: bool,
+}
+
+impl Default for PanelsOpen {
+    fn default() -> Self {
+        PanelsOpen {
+            left: true,
+            right: true,
+        }
     }
 }
 
@@ -193,6 +211,7 @@ fn panels(
     mut frame: ResMut<FrameRequest>,
     mut layout: ResMut<LayoutParams>,
     mut canvas: ResMut<CanvasRect>,
+    mut open: ResMut<PanelsOpen>,
     nodes: Query<(&GraphNode, Has<Hidden>)>,
     edges: Query<&GraphEdge>,
 ) {
@@ -223,6 +242,17 @@ fn panels(
 
     egui::Panel::top("top").show(ctx, |ui| {
         ui.horizontal(|ui| {
+            if ui
+                .button(if open.left { "⏴" } else { "⏵" })
+                .on_hover_text(if open.left {
+                    "Hide the filters"
+                } else {
+                    "Show the filters"
+                })
+                .clicked()
+            {
+                open.left = !open.left;
+            }
             ui.label(egui::RichText::new("🍄 Aneural").color(accent).strong());
             ui.label(egui::RichText::new(ws.name()).strong());
             ui.separator();
@@ -257,6 +287,17 @@ fn panels(
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
+                    .button(if open.right { "⏵" } else { "⏴" })
+                    .on_hover_text(if open.right {
+                        "Hide the inspector"
+                    } else {
+                        "Show the inspector"
+                    })
+                    .clicked()
+                {
+                    open.right = !open.right;
+                }
+                if ui
                     .button("⛶")
                     .on_hover_text("Fit the whole graph in view (F)")
                     .clicked()
@@ -274,7 +315,7 @@ fn panels(
         });
     });
 
-    egui::Panel::left("filters").resizable(true).default_size(240.0).show(ctx, |ui| {
+    egui::Panel::left("filters").resizable(true).default_size(240.0).show_collapsible(ctx, &mut open.left, |ui| {
         ui.heading("Filters");
         let resp = ui.add(egui::TextEdit::singleline(&mut filters.query).hint_text("search label / path"));
         if resp.changed() {
@@ -356,7 +397,7 @@ fn panels(
         });
     });
 
-    egui::Panel::right("inspector").resizable(true).default_size(310.0).show(ctx, |ui| {
+    egui::Panel::right("inspector").resizable(true).default_size(310.0).show_collapsible(ctx, &mut open.right, |ui| {
         ui.heading("Inspector");
         egui::ScrollArea::vertical().show(ui, |ui| {
             let mut select_next: Option<NodeId> = None;
