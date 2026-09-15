@@ -9,6 +9,8 @@ export function copyFixture(): string {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aneural-mcp-'));
   const root = path.join(tmp, 'sample-workspace');
   fs.cpSync(src, root, { recursive: true });
+  fs.rmSync(path.join(root, '.aneural/cache'), { recursive: true, force: true });
+  fs.rmSync(path.join(root, '.aneural/state'), { recursive: true, force: true });
   fs.mkdirSync(path.join(root, 'apps/web/.git'), { recursive: true });
   return fs.realpathSync(root);
 }

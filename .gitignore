@@ -11,7 +11,7 @@ packages/core/index.js
 packages/core/index.d.ts
 # aneural workspace caches
 .aneural/cache/
-.aneural/state/layout.json
+.aneural/state/
 # os / editors
 .DS_Store
 .idea/

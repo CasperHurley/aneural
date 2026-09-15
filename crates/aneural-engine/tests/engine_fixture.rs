@@ -24,6 +24,10 @@ fn sample() -> (tempfile::TempDir, PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("sample-workspace");
     copy_dir(&src, &root);
+    // never inherit an index cache or focus left behind by a local GUI run
+    for local in [".aneural/cache", ".aneural/state"] {
+        let _ = std::fs::remove_dir_all(root.join(local));
+    }
     let root = root.canonicalize().unwrap();
     for repo in ["apps/web", "services/api", "tools/cli"] {
         std::fs::create_dir_all(root.join(repo).join(".git")).unwrap();

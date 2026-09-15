@@ -105,7 +105,8 @@ fn step(
             if use_grid && dist2 > (cell * 2.0) * (cell * 2.0) {
                 return;
             }
-            let f = params.repulsion * snapshot[j].2.sqrt() / dist2;
+            // symmetric in (i, j) so the pair exerts no net force or torque
+            let f = params.repulsion * (snapshot[i].2 * snapshot[j].2).sqrt() / dist2;
             force[i] += d.normalize_or_zero() * f.min(60.0);
         };
         if use_grid {
@@ -139,8 +140,10 @@ fn step(
         force[i] += f;
         force[j] -= f;
         if e.kind == "CONTAINS" {
-            // child is pulled gently toward its parent
+            // child and parent are pulled gently together (equal and opposite,
+            // so the tree does not pick up angular momentum)
             force[j] -= d * params.gravity;
+            force[i] += d * params.gravity;
         }
     }
 
@@ -148,6 +151,46 @@ fn step(
     let centroid = snapshot.iter().map(|s| s.1).sum::<Vec2>() / n as f32;
     for (i, s) in snapshot.iter().enumerate() {
         force[i] -= (s.1 - centroid) * params.center_pull;
+    }
+
+    // integrate velocities
+    let mut next_v = vec![Vec2::ZERO; n];
+    for (i, s) in snapshot.iter().enumerate() {
+        if s.3 {
+            continue; // pinned
+        }
+        let vel = nodes.get(s.0).map(|(_, _, v, ..)| v.0).unwrap_or_default();
+        let mut v = (vel + force[i]) * params.damping;
+        if v.length() > params.max_speed {
+            v = v.normalize() * params.max_speed;
+        }
+        next_v[i] = v;
+    }
+
+    // Remove any rigid-body motion of the whole graph (drift + rotation about
+    // the centroid). Without this, tiny asymmetries accumulate into a slow
+    // perpetual spin that never settles and makes nodes wander off-screen.
+    let free: Vec<usize> = (0..n).filter(|&i| !snapshot[i].3).collect();
+    if free.len() > 1 {
+        let m = free.len() as f32;
+        let com = free.iter().map(|&i| snapshot[i].1).sum::<Vec2>() / m;
+        let mean_v = free.iter().map(|&i| next_v[i]).sum::<Vec2>() / m;
+        let mut ang_mom = 0.0;
+        let mut inertia = 0.0;
+        for &i in &free {
+            let r = snapshot[i].1 - com;
+            ang_mom += r.perp_dot(next_v[i]);
+            inertia += r.length_squared();
+        }
+        let omega = if inertia > 1.0 {
+            ang_mom / inertia
+        } else {
+            0.0
+        };
+        for &i in &free {
+            let r = snapshot[i].1 - com;
+            next_v[i] -= mean_v + r.perp() * omega;
+        }
     }
 
     let mut energy = 0.0;
@@ -160,16 +203,17 @@ fn step(
             vel.0 = Vec2::ZERO;
             continue;
         }
-        let mut v = (vel.0 + force[i]) * params.damping;
-        if v.length() > params.max_speed {
-            v = v.normalize() * params.max_speed;
-        }
+        let v = next_v[i];
         pos.0 += v;
         vel.0 = v;
         energy += v.length_squared();
     }
     if energy / (n as f32) < params.epsilon {
         params.frozen = true;
+        debug!("layout settled ({n} nodes)");
+        for (_, _, mut vel, ..) in &mut nodes {
+            vel.0 = Vec2::ZERO;
+        }
     }
     let _ = &graph;
 }

@@ -12,6 +12,9 @@ let root = '';
 beforeAll(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'aneural-core-'));
   fs.cpSync(fixture, root, { recursive: true });
+  // never inherit an index cache or focus left behind by a local GUI run
+  fs.rmSync(path.join(root, '.aneural/cache'), { recursive: true, force: true });
+  fs.rmSync(path.join(root, '.aneural/state'), { recursive: true, force: true });
   fs.mkdirSync(path.join(root, 'apps/web/.git'), { recursive: true });
   root = fs.realpathSync(root);
 });

@@ -49,7 +49,7 @@ config.json          workspace config (see aneural-core::config::Config)
 nodes/*.json         custom node types
 spores/<name>/       installed spores (spore.json)
 notes/ plans/ icebox/   markdown harvested by first-party spores
-state/focus.json     GUI → MCP handoff (gitignore state/layout.json)
+state/focus.json     GUI → MCP handoff (local; state/ is gitignored)
 cache/index.db       derived, gitignored
 ```
 

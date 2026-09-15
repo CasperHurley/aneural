@@ -133,7 +133,7 @@ impl Workspace {
         self.save_config(&config)?;
         let gi = dir.join(".gitignore");
         if !gi.exists() {
-            std::fs::write(&gi, "cache/\nstate/layout.json\n")?;
+            std::fs::write(&gi, "cache/\nstate/\n")?;
         }
         let icebox = self.icebox_dir().join("ideas.md");
         if !icebox.exists() {

@@ -42,6 +42,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm --filter @aneural/core build:debug
+      # the CLI typechecks against @aneural/mcp's emitted declarations
+      - run: pnpm --filter @aneural/mcp build
       - run: pnpm -r typecheck
-      - run: pnpm --filter aneural --filter @aneural/mcp build
+      - run: pnpm --filter aneural build
       - run: pnpm -r test
