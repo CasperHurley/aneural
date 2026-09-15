@@ -2,7 +2,7 @@
 //! pins, left-drag moves (and pins while held). Left-drag on empty canvas is
 //! a pan (see `camera`); a background click without movement clears selection.
 
-use crate::camera::{MainCamera, PanGrab, UiCapture};
+use crate::camera::{CanvasRect, MainCamera, PanGrab, UiCapture};
 use crate::graph::{GraphNode, GraphState, Hidden, Pinned, Pos, Vel};
 use crate::layout::LayoutParams;
 use crate::workspace::node_radius;
@@ -79,6 +79,7 @@ pub fn pick(
     windows: Query<&Window, With<PrimaryWindow>>,
     cam: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     capture: Res<UiCapture>,
+    canvas: Res<CanvasRect>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut queries: ParamSet<(
@@ -93,7 +94,14 @@ pub fn pick(
     grab: Res<PanGrab>,
 ) {
     let world = cursor_world(&windows, &cam);
-    let over_ui = capture.pointer;
+    // The graph is drawn under the panels as well as beside them, so a node
+    // behind one must not answer the pointer: the canvas rectangle decides.
+    let on_canvas = windows
+        .single()
+        .ok()
+        .and_then(Window::cursor_position)
+        .is_some_and(|p| canvas.contains(p));
+    let over_ui = capture.pointer || !on_canvas;
 
     // dragging in progress
     if let Some(e) = drag.entity {

@@ -166,6 +166,7 @@ fn read_ui_capture(mut contexts: EguiContexts, mut capture: ResMut<UiCapture>) {
 /// background left-presses so they pan instead of picking.
 fn gate_pancam(
     capture: Res<UiCapture>,
+    canvas: Res<CanvasRect>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut wheel: MessageReader<MouseWheel>,
     hovered: Res<Hovered>,
@@ -176,9 +177,13 @@ fn gate_pancam(
     mut cams: Query<&mut PanCam>,
 ) {
     let cursor = windows.single().ok().and_then(Window::cursor_position);
+    // The panels are painted into egui's background layer, which egui does not
+    // report as an area the pointer is over, so the canvas rectangle is what
+    // actually says whether a wheel tick or a drag belongs to the graph.
+    let on_canvas = cursor.is_some_and(|c| canvas.contains(c)) && !capture.pointer;
 
     if mouse.just_pressed(MouseButton::Left) {
-        grab.active = !capture.pointer && hovered.0.is_none() && drag.entity.is_none();
+        grab.active = on_canvas && hovered.0.is_none() && drag.entity.is_none();
         grab.moved = false;
         grab.start = cursor.unwrap_or_default();
     }
@@ -193,9 +198,9 @@ fn gate_pancam(
         }
     }
 
-    let side_pan = (mouse.pressed(MouseButton::Right) || mouse.pressed(MouseButton::Middle))
-        && !capture.pointer;
-    let scrolled = wheel.read().next().is_some() && !capture.pointer;
+    let side_pan =
+        (mouse.pressed(MouseButton::Right) || mouse.pressed(MouseButton::Middle)) && on_canvas;
+    let scrolled = wheel.read().next().is_some() && on_canvas;
     if (grab.active && grab.moved) || side_pan || scrolled {
         follow.0 = false;
     }
@@ -206,7 +211,7 @@ fn gate_pancam(
         && if mouse.pressed(MouseButton::Left) {
             grab.active
         } else {
-            !capture.pointer
+            on_canvas
         };
     for mut cam in &mut cams {
         cam.enabled = enabled;
