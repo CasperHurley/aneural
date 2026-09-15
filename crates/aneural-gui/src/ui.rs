@@ -60,6 +60,40 @@ fn style_once(mut contexts: EguiContexts, styled: Option<ResMut<Styled>>, mut co
     commands.insert_resource(Styled(true));
 }
 
+/// The watcher's telltale: a pupil that every few seconds opens into an eye
+/// and closes again, so the status line shows it is awake.
+fn watching_eye(ui: &mut egui::Ui, color: egui::Color32) -> egui::Response {
+    const CYCLE: f64 = 5.0;
+    const BLINK: f64 = 1.3;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(16.0, 12.0), egui::Sense::hover());
+    let phase = ui.input(|i| i.time) % CYCLE;
+    // one smooth open-and-shut at the top of each cycle
+    let open = if phase < BLINK {
+        (std::f64::consts::PI * phase / BLINK).sin() as f32
+    } else {
+        0.0
+    };
+    let c = rect.center();
+    let painter = ui.painter();
+    if open > 0.01 {
+        let (w, h) = (7.5, 5.5 * open);
+        // a lid is a parabola from corner to corner, mirrored above and below
+        let lid = |sign: f32| -> Vec<egui::Pos2> {
+            (0..=12)
+                .map(|i| {
+                    let x = -w + 2.0 * w * (i as f32 / 12.0);
+                    egui::pos2(c.x + x, c.y + sign * h * (1.0 - (x / w).powi(2)))
+                })
+                .collect()
+        };
+        let stroke = egui::Stroke::new(1.2, color.gamma_multiply(open));
+        painter.add(egui::Shape::line(lid(-1.0), stroke));
+        painter.add(egui::Shape::line(lid(1.0), stroke));
+    }
+    painter.circle_filled(c, 3.0 - 1.0 * open, color);
+    resp
+}
+
 /// The canvas is not egui, so it sets its own cursor: a hand over a node, an
 /// open palm over the background, a closed one while the view is being dragged.
 fn canvas_cursor(
@@ -152,7 +186,9 @@ fn panels(
                 ui.label(progress)
                     .on_hover_text("Reading the workspace: files, imports and spores.");
             } else if status.watching {
-                ui.label(egui::RichText::new("⏺ watching").color(accent)).on_hover_text(
+                let eye = watching_eye(ui, accent);
+                let text = ui.label(egui::RichText::new("watching").color(accent));
+                (eye | text).on_hover_text(
                     "Everything is in the graph. Files you add, edit or delete are picked up on their own.",
                 );
             }
