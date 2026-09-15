@@ -274,15 +274,8 @@ fn panels(
         }
     }
     let mut edge_counts: BTreeMap<String, usize> = BTreeMap::new();
-    let mut decluttered = 0usize;
     for e in &edges {
         *edge_counts.entry(e.kind.clone()).or_default() += 1;
-        let crowd = graph
-            .kind_degree(e.src, &e.kind)
-            .min(graph.kind_degree(e.dst, &e.kind));
-        if filters.decluttered(&e.kind, crowd) {
-            decluttered += 1;
-        }
     }
 
     // The bar carries the app's name and what it is doing, so it gets room to
@@ -390,17 +383,6 @@ fn panels(
                 });
             }
             ui.separator();
-            ui.label(egui::RichText::new("Declutter").strong());
-            let mut limit = filters.hub_limit;
-            if ui.add(egui::Slider::new(&mut limit, 0..=64).text("hub links").custom_formatter(|v, _| if v < 1.0 { "off".into() } else { format!("{v:.0}") })).hand().changed() {
-                filters.hub_limit = limit;
-            }
-            ui.label(egui::RichText::new(if decluttered > 0 {
-                format!("{decluttered} links between busy nodes hidden — hover or select either end to see them")
-            } else {
-                "every link is drawn".into()
-            }).weak().small());
-            ui.separator();
             ui.label(egui::RichText::new("Repos").strong());
             let mut repos: Vec<(NodeId, String)> = nodes.iter().filter(|(n, _)| n.kind == "Repo").map(|(n, _)| (n.id.clone(), n.path.clone().unwrap_or_else(|| n.label.clone()))).collect();
             repos.sort_by(|a, b| a.1.cmp(&b.1));
@@ -424,18 +406,6 @@ fn panels(
             }
             if !filters.repos.is_empty() && ui.small_button("all repos").clicked() {
                 filters.repos.clear();
-                filters.dirty = true;
-            }
-            ui.separator();
-            ui.label(egui::RichText::new("Focus").strong());
-            let mut fm = filters.focus_mode;
-            if ui.checkbox(&mut fm, "focus mode (selection + neighbours only)").hand().changed() {
-                filters.focus_mode = fm;
-                filters.dirty = true;
-            }
-            let mut depth = filters.neighborhood_depth;
-            if ui.add(egui::Slider::new(&mut depth, 0..=4).text("depth")).hand().changed() {
-                filters.neighborhood_depth = depth;
                 filters.dirty = true;
             }
             ui.add_space(8.0);
@@ -553,20 +523,39 @@ fn panels(
     // whatever the panels left over is the graph canvas
     let rect = ctx.available_rect_before_wrap();
 
-    // Fitting the view is an act on the canvas, so the control lives on it:
-    // tucked into the bottom corner of whatever the panels left over.
+    // Acts on the canvas belong on the canvas, tucked into the bottom corner
+    // of whatever the panels have left over.
     let size = egui::vec2(30.0, 30.0);
+    let tools = egui::vec2(size.x * 2.0 + 6.0, size.y);
     egui::Area::new("canvas tools".into())
         .order(egui::Order::Foreground)
-        .fixed_pos(rect.max - size - egui::vec2(12.0, 12.0))
+        .fixed_pos(rect.max - tools - egui::vec2(12.0, 12.0))
         .show(&ctx.ctx().clone(), |ui| {
-            if ui
-                .add_sized(size, egui::Button::new(egui::RichText::new("⛶").size(15.0)))
-                .on_hover_text("Fit the whole graph in view (F)")
-                .clicked()
-            {
-                frame.0 = true;
-            }
+            ui.horizontal(|ui| {
+                let on = filters.focus_mode;
+                if ui
+                    .add_sized(
+                        size,
+                        egui::Button::new(egui::RichText::new("🔘").size(15.0)).selected(on),
+                    )
+                    .on_hover_text(if on {
+                        "Showing everything again"
+                    } else {
+                        "Focus: show only what is selected and its neighbours, and share                          that alone with the assistant"
+                    })
+                    .clicked()
+                {
+                    filters.focus_mode = !on;
+                    filters.dirty = true;
+                }
+                if ui
+                    .add_sized(size, egui::Button::new(egui::RichText::new("⛶").size(15.0)))
+                    .on_hover_text("Fit the whole graph in view (F)")
+                    .clicked()
+                {
+                    frame.0 = true;
+                }
+            });
         });
 
     let (min, max) = (

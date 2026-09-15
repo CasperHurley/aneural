@@ -7,9 +7,15 @@ use aneural_core::NodeId;
 use bevy::prelude::*;
 use std::collections::HashSet;
 
-/// Generous by default: ordinary code structure is well under this, so only a
-/// genuine mesh is thinned out.
-pub const DEFAULT_HUB_LIMIT: u32 = 8;
+/// A link between two nodes that each already have more than this many of the
+/// same kind is held back until one of its ends is picked up. Ordinary code
+/// structure is well under it, so only a genuine mesh is thinned out and small
+/// workspaces lose nothing.
+const CROWD_LIMIT: u32 = 8;
+
+/// How far focus reaches around what is selected: the immediate neighbours,
+/// and no dial to turn.
+pub const FOCUS_DEPTH: u32 = 1;
 
 #[derive(Resource, Debug, Clone)]
 pub struct Filters {
@@ -20,14 +26,9 @@ pub struct Filters {
     pub repos: HashSet<NodeId>,
     pub query: String,
     pub show_structural_edges: bool,
-    /// Hide a non-structural link when both of its ends already have more than
-    /// this many links *of that same kind*, so a dense relation reads as a
-    /// cluster instead of a solid mat while a sparse one stays whole. 0 draws
-    /// everything. Hidden links come back the moment either end is hovered or
-    /// selected.
-    pub hub_limit: u32,
+    /// Show only what is selected and its neighbours — the same slice that
+    /// goes to the assistant as the focus.
     pub focus_mode: bool,
-    pub neighborhood_depth: u32,
     pub last_generation: u64,
     pub dirty: bool,
 }
@@ -40,9 +41,7 @@ impl Default for Filters {
             repos: HashSet::new(),
             query: String::new(),
             show_structural_edges: true,
-            hub_limit: DEFAULT_HUB_LIMIT,
             focus_mode: false,
-            neighborhood_depth: 1,
             last_generation: 0,
             dirty: true,
         }
@@ -53,10 +52,10 @@ impl Filters {
     pub fn kind_visible(&self, kind: &str) -> bool {
         !self.hidden_kinds.contains(kind)
     }
-    /// Is this link one of the ones `hub_limit` thins out? `crowd` is the
-    /// smaller of the two ends' link counts for this kind.
+    /// Is this link one of the ones a crowd holds back? `crowd` is the smaller
+    /// of the two ends' link counts for this kind.
     pub fn decluttered(&self, kind: &str, crowd: u32) -> bool {
-        kind != "CONTAINS" && self.hub_limit > 0 && crowd > self.hub_limit
+        kind != "CONTAINS" && crowd > CROWD_LIMIT
     }
     pub fn edge_visible(&self, kind: &str) -> bool {
         if kind == "CONTAINS" && !self.show_structural_edges {
@@ -136,7 +135,7 @@ fn apply_filters(
             None
         } else {
             let f = filters.clone();
-            Some(graph.neighborhood(&roots, filters.neighborhood_depth, &|k| f.edge_visible(k)))
+            Some(graph.neighborhood(&roots, FOCUS_DEPTH, &|k| f.edge_visible(k)))
         }
     } else {
         None

@@ -1,7 +1,7 @@
 //! Derive `.aneural/state/focus.json` from the UI state (debounced writes).
 
 use crate::engine::IndexStatus;
-use crate::filters::Filters;
+use crate::filters::{FOCUS_DEPTH, Filters};
 use crate::graph::{GraphNode, Hidden};
 use crate::picking::Selection;
 use crate::workspace::WorkspaceRes;
@@ -52,7 +52,7 @@ pub fn build_focus(
     f.selection.primary = selection.primary.clone();
     f.selection.pinned = selection.pinned.clone();
     f.neighborhood = Neighborhood {
-        depth: filters.neighborhood_depth,
+        depth: FOCUS_DEPTH,
         direction: Direction::Both,
     };
     let mut visible: Vec<_> = nodes
