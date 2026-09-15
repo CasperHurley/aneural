@@ -139,23 +139,22 @@ fn panels(
             ui.label(egui::RichText::new("🍄 Aneural").color(accent).strong());
             ui.label(egui::RichText::new(ws.name()).strong());
             ui.separator();
-            let phase = if !status.complete {
-                if status.total > 0 {
-                    format!("Growing… {} {}/{}", status.phase, status.done, status.total)
+            // one indicator with two states: reading files, or idle and watching
+            if status.busy {
+                ui.add(egui::Spinner::new().size(12.0).color(accent));
+                // phase and counts belong to the initial index; a live batch
+                // from the watcher has neither
+                let progress = if !status.complete && status.total > 0 {
+                    format!("indexing {} {}/{}", status.phase, status.done, status.total)
                 } else {
-                    format!("Growing… {}", status.phase)
-                }
-            } else {
-                "Grown".to_string()
-            };
-            ui.label(phase).on_hover_text(if status.complete {
-                "Every file in the workspace has been read into the graph."
-            } else {
-                "Reading the workspace: files, imports and spores."
-            });
-            if status.watching {
-                ui.label(egui::RichText::new("⏺ watching").color(accent))
-                    .on_hover_text("Files you add, edit or delete are picked up on their own.");
+                    "indexing".to_string()
+                };
+                ui.label(progress)
+                    .on_hover_text("Reading the workspace: files, imports and spores.");
+            } else if status.watching {
+                ui.label(egui::RichText::new("⏺ watching").color(accent)).on_hover_text(
+                    "Everything is in the graph. Files you add, edit or delete are picked up on their own.",
+                );
             }
             ui.label(format!(
                 "{} nodes · {} edges",

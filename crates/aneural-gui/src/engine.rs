@@ -3,6 +3,7 @@
 use crate::graph::{GraphState, apply_delta};
 use crate::workspace::WorkspaceRes;
 use aneural_core::GraphDelta;
+use aneural_core::graph::DeltaPhase;
 use aneural_engine::{EngineCommand, EngineEvent};
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
@@ -21,6 +22,11 @@ pub struct IndexStatus {
     pub total: u64,
     pub complete: bool,
     pub watching: bool,
+    /// True while the engine is reading files: the whole initial index, and
+    /// for a moment after each batch the watcher brings in.
+    pub busy: bool,
+    /// When `busy` may drop again, in seconds of elapsed app time.
+    busy_until: f64,
     pub last_error: Option<String>,
     pub last_stats: Option<aneural_core::graph::IndexStats>,
     /// Bumped whenever graph content changes (layout wakes up, filters recompute).
@@ -66,11 +72,20 @@ fn drain_events(
     mut materials: ResMut<Assets<ColorMaterial>>,
     atlas: Res<crate::render::IconAtlas>,
     mut nodes: Query<(&mut crate::graph::GraphNode, &crate::graph::Pos)>,
+    time: Res<Time>,
 ) {
     let Some(rx) = rx else { return };
+    let now = time.elapsed_secs_f64();
     while let Ok(ev) = rx.0.try_recv() {
         match ev {
-            EngineEvent::Delta(d) => pending.0.push_back(d),
+            EngineEvent::Delta(d) => {
+                // a live batch is the watcher reacting; hold `busy` briefly so
+                // the status line has time to say so
+                if d.phase == DeltaPhase::Live {
+                    status.busy_until = now + 0.8;
+                }
+                pending.0.push_back(d);
+            }
             EngineEvent::Progress { phase, done, total } => {
                 status.phase = phase.to_string();
                 status.done = done;
@@ -88,6 +103,7 @@ fn drain_events(
             }
         }
     }
+    status.busy = !status.complete || status.busy_until > now;
     if pending.0.is_empty() {
         return;
     }
