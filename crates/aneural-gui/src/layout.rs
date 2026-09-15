@@ -98,6 +98,9 @@ fn step(
     if n == 0 {
         return;
     }
+    // A thousand nodes need more room than a hundred: stretch the rest lengths
+    // and push harder, so a big workspace spreads instead of balling up.
+    let spread = (n as f32 / 120.0).sqrt().clamp(1.0, 3.0);
     let index: HashMap<Entity, usize> = snapshot
         .iter()
         .enumerate()
@@ -106,7 +109,7 @@ fn step(
     let mut force = vec![Vec2::ZERO; n];
 
     // repulsion — spatial hash for large graphs
-    let cell = 120.0_f32;
+    let cell = 120.0_f32 * spread;
     let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
     for (i, (_, p, _, _)) in snapshot.iter().enumerate() {
         grid.entry(((p.x / cell).floor() as i32, (p.y / cell).floor() as i32))
@@ -126,8 +129,9 @@ fn step(
                 return;
             }
             // symmetric in (i, j) so the pair exerts no net force or torque
-            let f = params.repulsion * (snapshot[i].2 * snapshot[j].2).sqrt() / dist2;
-            force[i] += d.normalize_or_zero() * f.min(60.0);
+            let f =
+                params.repulsion * spread * spread * (snapshot[i].2 * snapshot[j].2).sqrt() / dist2;
+            force[i] += d.normalize_or_zero() * f.min(60.0 * spread);
         };
         if use_grid {
             let cx = (pi.x / cell).floor() as i32;
@@ -155,7 +159,7 @@ fn step(
         };
         let d = snapshot[j].1 - snapshot[i].1;
         let dist = d.length().max(0.01);
-        let stretch = dist - rest_length(&e.kind);
+        let stretch = dist - rest_length(&e.kind) * spread;
         let f = d / dist * (stretch * params.spring).clamp(-30.0, 30.0);
         force[i] += f;
         force[j] -= f;
@@ -170,7 +174,7 @@ fn step(
     // centering
     let centroid = snapshot.iter().map(|s| s.1).sum::<Vec2>() / n as f32;
     for (i, s) in snapshot.iter().enumerate() {
-        force[i] -= (s.1 - centroid) * params.center_pull;
+        force[i] -= (s.1 - centroid) * params.center_pull / spread;
     }
 
     // integrate velocities

@@ -7,6 +7,7 @@ use crate::theme;
 use crate::workspace::{WorkspaceRes, node_radius};
 use aneural_core::Node;
 use bevy::asset::RenderAssetUsages;
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use std::collections::HashMap;
@@ -37,12 +38,20 @@ impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<IconAtlas>()
             .init_resource::<MeshCache>()
-            .add_systems(Startup, build_icon_atlas)
+            .add_systems(Startup, (build_icon_atlas, hyphae_behind_nodes))
             .add_systems(
                 Update,
                 (draw_edges, label_visibility, selection_ring, hover_scale),
             );
     }
+}
+
+/// 2D gizmos are always queued last, whatever their depth, so the hyphae would
+/// paint over the nodes. Park them on their own render layer: the main camera
+/// draws that layer, then `NodeCamera` redraws the nodes over the top.
+fn hyphae_behind_nodes(mut store: ResMut<GizmoConfigStore>) {
+    let (config, _) = store.config_mut::<DefaultGizmoConfigGroup>();
+    config.render_layers = RenderLayers::layer(crate::camera::HYPHAE_LAYER);
 }
 
 fn build_icon_atlas(mut atlas: ResMut<IconAtlas>, mut images: ResMut<Assets<Image>>) {

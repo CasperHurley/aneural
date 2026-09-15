@@ -11,6 +11,7 @@ use crate::graph::{GraphNode, Hidden, Pos};
 use crate::layout::LayoutParams;
 use crate::picking::{DragState, Hovered};
 use aneural_engine::EngineCommand;
+use bevy::camera::visibility::RenderLayers;
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -24,6 +25,15 @@ const PAN_DEADZONE: f32 = 4.0;
 
 #[derive(Component)]
 pub struct MainCamera;
+
+/// Second pass over the same view. 2D gizmos are always queued last, so the
+/// hyphae would paint over the nodes; instead the main camera draws only the
+/// gizmo layer and this one redraws the nodes on top of them.
+#[derive(Component)]
+pub struct NodeCamera;
+
+/// The render layer the hyphae gizmos live on (the main camera's own).
+pub const HYPHAE_LAYER: usize = 1;
 
 #[derive(Resource, Default)]
 pub struct UiCapture {
@@ -93,7 +103,9 @@ impl Plugin for CameraPlugin {
                     (gate_pancam, hotkeys)
                         .after(crate::picking::pick)
                         .before(PanCamSystems),
-                    (frame_all, follow_graph).after(PanCamSystems),
+                    (frame_all, follow_graph, sync_node_camera)
+                        .chain()
+                        .after(PanCamSystems),
                 ),
             );
     }
@@ -103,6 +115,7 @@ fn spawn_camera(mut commands: Commands) {
     commands.spawn((
         MainCamera,
         Camera2d,
+        RenderLayers::layer(HYPHAE_LAYER),
         PanCam {
             grab_buttons: vec![MouseButton::Left, MouseButton::Right, MouseButton::Middle],
             zoom_to_cursor: true,
@@ -111,6 +124,28 @@ fn spawn_camera(mut commands: Commands) {
             ..default()
         },
     ));
+    commands.spawn((
+        NodeCamera,
+        Camera2d,
+        Camera {
+            order: 1,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+        RenderLayers::layer(0),
+    ));
+}
+
+/// Keep the node pass looking through the same lens as the main camera.
+fn sync_node_camera(
+    main: Query<(&Transform, &Projection), (With<MainCamera>, Without<NodeCamera>)>,
+    mut overlay: Query<(&mut Transform, &mut Projection), With<NodeCamera>>,
+) {
+    let (Ok((t, p)), Ok((mut ot, mut op))) = (main.single(), overlay.single_mut()) else {
+        return;
+    };
+    *ot = *t;
+    *op = p.clone();
 }
 
 fn read_ui_capture(mut contexts: EguiContexts, mut capture: ResMut<UiCapture>) {
