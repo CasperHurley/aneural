@@ -56,7 +56,17 @@ pub fn start_engine(root: &std::path::Path) -> (EngineRx, EngineTx) {
     let root = root.to_path_buf();
     std::thread::Builder::new()
         .name("aneural-engine".into())
-        .spawn(move || aneural_engine::run(&root, ev_tx, cmd_rx))
+        .spawn(move || {
+            // The GUI is a host that may call out: the marketplace already
+            // links a TLS stack, so handing the engine a fetcher here costs
+            // nothing and is what makes tier-1 spores work.
+            aneural_engine::run_with(
+                &root,
+                ev_tx,
+                cmd_rx,
+                Some(Box::new(aneural_registry::UreqFetcher::new())),
+            )
+        })
         .expect("spawn engine thread");
     (EngineRx(ev_rx), EngineTx(cmd_tx))
 }
@@ -71,6 +81,7 @@ fn spawn_engine(mut commands: Commands, ws: Res<WorkspaceRes>) {
 fn drain_events(
     mut commands: Commands,
     rx: Option<Res<EngineRx>>,
+    mut spores_res: Option<ResMut<crate::marketplace::SporesRes>>,
     mut status: ResMut<IndexStatus>,
     mut pending: ResMut<PendingDeltas>,
     mut graph: ResMut<GraphState>,
@@ -78,6 +89,8 @@ fn drain_events(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     atlas: Res<crate::render::IconAtlas>,
+    glow: Res<crate::render::GlowTexture>,
+    vibe: Res<crate::circadian::Vibe>,
     mut nodes: Query<(&mut crate::graph::GraphNode, &crate::graph::Pos)>,
     time: Res<Time>,
 ) {
@@ -104,6 +117,12 @@ fn drain_events(
                 status.last_stats = Some(stats);
             }
             EngineEvent::Watching => status.watching = true,
+            EngineEvent::Spores { spores, errors } => {
+                if let Some(res) = spores_res.as_mut() {
+                    res.spores = spores;
+                    res.errors = errors;
+                }
+            }
             EngineEvent::Error(e) => {
                 warn!("engine: {e}");
                 status.last_error = Some(e);
@@ -115,6 +134,13 @@ fn drain_events(
         return;
     }
     let mut budget = ws.config.gui.growth_budget_per_frame.max(1) as usize;
+    let mut visuals = crate::render::Visuals {
+        meshes: &mut meshes,
+        materials: &mut materials,
+        atlas: &atlas,
+        glow: &glow,
+        vibe: &vibe,
+    };
     while budget > 0 {
         let Some(mut delta) = pending.0.pop_front() else {
             break;
@@ -137,9 +163,7 @@ fn drain_events(
                 &mut commands,
                 &mut graph,
                 &ws,
-                &mut meshes,
-                &mut materials,
-                &atlas,
+                &mut visuals,
                 &mut nodes,
                 delta,
             );
@@ -149,9 +173,7 @@ fn drain_events(
                 &mut commands,
                 &mut graph,
                 &ws,
-                &mut meshes,
-                &mut materials,
-                &atlas,
+                &mut visuals,
                 &mut nodes,
                 delta,
             );

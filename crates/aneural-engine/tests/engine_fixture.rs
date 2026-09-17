@@ -287,7 +287,18 @@ fn indexes_sample_workspace_and_reacts_live() {
     let idea = types.iter().find(|t| t.kind == "Idea").unwrap();
     assert_eq!(idea.color, "#f5c542");
     assert!(idea.provider.starts_with("spore:"));
-    assert_eq!(engine.spores().len(), 4);
+    assert_eq!(
+        engine.spores().len(),
+        aneural_engine::spores::BUILTIN_SPORES.len()
+    );
+    // `database` ships but is not enabled by default: it would walk every `.db`
+    // in the workspace, which is worth opting into.
+    let database = engine
+        .spores()
+        .into_iter()
+        .find(|s| s.id == "aneural.database")
+        .unwrap();
+    assert!(!database.enabled);
 
     // second run: everything skipped, still fully emitted
     let mut events2 = Vec::new();

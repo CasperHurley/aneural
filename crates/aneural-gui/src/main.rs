@@ -3,11 +3,13 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
 mod camera;
+mod circadian;
 mod engine;
 mod filters;
 mod focus;
 mod graph;
 mod layout;
+mod marketplace;
 mod picking;
 mod render;
 mod switch;
@@ -64,6 +66,7 @@ fn main() {
         .insert_resource(workspace)
         .init_resource::<graph::GraphState>()
         .add_plugins((
+            circadian::CircadianPlugin,
             render::RenderPlugin,
             engine::EnginePlugin,
             layout::LayoutPlugin,
@@ -73,6 +76,7 @@ fn main() {
             ui::UiPlugin,
             focus::FocusPlugin,
             switch::SwitchPlugin,
+            marketplace::MarketplacePlugin,
         ))
         .add_systems(
             Update,

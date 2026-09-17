@@ -1,0 +1,157 @@
+{
+  "version": 1,
+  "name": "Aneural Official Spores",
+  "spores": [
+    {
+      "id": "aneural.comments",
+      "version": "0.1.0",
+      "displayName": "Code Comments",
+      "description": "Surfaces TODO / FIXME / HACK / NOTE / XXX and `claude:` marker comments left in source files as Comment nodes attached to the file they live in.",
+      "license": "MIT",
+      "repo": "github:Parnassix/aneural#spores/comments/v0.1.0",
+      "path": "spores/comments",
+      "files": {
+        "README.md": "c072396df173a8366294407c1086fe3c14d020355f5aef26ed852f50648a9230",
+        "spore.json": "be01f80b55576998e8725d7e990ffd750e63ef00032e22f8945aa3f1042f6713"
+      },
+      "keywords": [],
+      "categories": [],
+      "nodeKinds": [
+        "Comment"
+      ],
+      "capabilities": [],
+      "firstParty": true
+    },
+    {
+      "id": "aneural.database",
+      "version": "0.1.0",
+      "displayName": "Local Databases",
+      "description": "Reads the schema of any SQLite database in your workspace: one Table node per table, with its columns, row count, and REFERENCES edges following the foreign keys.",
+      "license": "MIT",
+      "repo": "github:Parnassix/aneural#spores/database/v0.1.0",
+      "path": "spores/database",
+      "files": {
+        "README.md": "a90bd1e0b701213393f1c7b3a8e19e754ca6c960402ff8fd455f77e2925e46cf",
+        "spore.json": "69206dba203c11fba3a6b171ff4fb905260ec5e7653a274ff9667073b6a86bd5"
+      },
+      "keywords": [
+        "database",
+        "sqlite",
+        "schema",
+        "sql"
+      ],
+      "categories": [
+        "data"
+      ],
+      "nodeKinds": [
+        "Table"
+      ],
+      "capabilities": [],
+      "firstParty": true
+    },
+    {
+      "id": "aneural.github",
+      "version": "0.1.0",
+      "displayName": "GitHub Pull Requests",
+      "description": "Open pull requests as nodes, joined to the files each one changes. The first spore that reaches off your machine: it needs a host allowlist and a token, and asks before either.",
+      "license": "MIT",
+      "repo": "github:Parnassix/aneural#spores/github/v0.1.0",
+      "path": "spores/github",
+      "files": {
+        "README.md": "9b3f360d473764dc74fe3e2224bf8d0086f5d15891c757f58253b4b1b4e4c6a0",
+        "spore.json": "ce96e496ba83c4f998e323577b73680b2ef217f76ff45967d7a95aa801a7015f"
+      },
+      "keywords": [
+        "github",
+        "pull-request",
+        "review",
+        "collaboration"
+      ],
+      "categories": [
+        "Collaboration"
+      ],
+      "nodeKinds": [
+        "PullRequest"
+      ],
+      "capabilities": [
+        {
+          "kind": "http",
+          "hosts": [
+            "api.github.com"
+          ]
+        },
+        {
+          "kind": "secret",
+          "names": [
+            "githubToken"
+          ],
+          "hosts": [
+            "api.github.com"
+          ]
+        }
+      ],
+      "firstParty": true
+    },
+    {
+      "id": "aneural.icebox",
+      "version": "0.1.0",
+      "displayName": "Icebox",
+      "description": "A lightweight backlog: every `## heading` in `.aneural/icebox/*.md` becomes an Idea node. No tickets, no tracker — just markdown.",
+      "license": "MIT",
+      "repo": "github:Parnassix/aneural#spores/icebox/v0.1.0",
+      "path": "spores/icebox",
+      "files": {
+        "README.md": "9e74a95293d7063bbd79f4e9bcde15d57e118812ae0431029eaa2006be23a7e0",
+        "spore.json": "c73fcd3033170e23d978b6bc7dbafcb9396f82fd561f388c9f1d9828f3941347"
+      },
+      "keywords": [],
+      "categories": [],
+      "nodeKinds": [
+        "Idea"
+      ],
+      "capabilities": [],
+      "firstParty": true
+    },
+    {
+      "id": "aneural.plans",
+      "version": "0.1.0",
+      "displayName": "Plans",
+      "description": "Turns plan documents (Claude Code plan files, `.aneural/plans`, `docs/plans`) into Plan nodes that annotate the files they target via a `targets:` frontmatter list.",
+      "license": "MIT",
+      "repo": "github:Parnassix/aneural#spores/plans/v0.1.0",
+      "path": "spores/plans",
+      "files": {
+        "README.md": "463616cf7b1e73af93253a778c426e199a126d7a054b5d0a378f2756be15bd8e",
+        "spore.json": "aaab24274eafe0ed03a7bd852d36f8601d3b8a851658a8af1cd6c0ccf00789b5"
+      },
+      "keywords": [],
+      "categories": [],
+      "nodeKinds": [
+        "Plan"
+      ],
+      "capabilities": [],
+      "firstParty": true
+    },
+    {
+      "id": "aneural.wiki-links",
+      "version": "0.1.0",
+      "displayName": "Notes & Wiki-links",
+      "description": "Obsidian-style knowledge without the vault: `.aneural/notes/*.md` become Note nodes, and every `[[Wiki Link]]` in any markdown file becomes a RELATES_TO edge between files.",
+      "license": "MIT",
+      "repo": "github:Parnassix/aneural#spores/wiki-links/v0.1.0",
+      "path": "spores/wiki-links",
+      "files": {
+        "README.md": "0356b433ccfcad83832868318a2521913cf956606cb38e52119faebcae60e738",
+        "spore.json": "2ac99f3e012dd3baa4c5a7d897ef74c216ab5ee2f755af1e676809d7f535803f"
+      },
+      "keywords": [],
+      "categories": [],
+      "nodeKinds": [
+        "Note"
+      ],
+      "capabilities": [],
+      "firstParty": true
+    }
+  ],
+  "revoked": []
+}

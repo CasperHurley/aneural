@@ -1,9 +1,10 @@
 {
-  "$schema": "https://aneural.dev/schema/spore-v1.json",
+  "$schema": "https://aneural.dev/schema/spore-v2.json",
+  "publisher": "aneural",
   "name": "icebox",
   "version": "0.1.0",
   "displayName": "Icebox",
-  "description": "A lightweight backlog: every `## heading` in `.aneural/icebox/*.md` becomes an Idea node. No tickets, no tracker — just markdown.",
+  "description": "A lightweight backlog: every `## heading` in `.aneural/icebox/*.md` becomes an Idea node. No tickets, no tracker \u2014 just markdown.",
   "license": "MIT",
   "aneural": ">=0.1",
   "nodeTypes": [
@@ -16,26 +17,55 @@
       "description": "An idea parked in the icebox"
     }
   ],
-  "edgeTypes": [{ "kind": "RELATES_TO", "label": "relates to", "style": "dashed" }],
+  "edgeTypes": [
+    {
+      "kind": "RELATES_TO",
+      "label": "relates to",
+      "style": "dashed"
+    }
+  ],
   "harvesters": [
     {
       "id": "ideas",
       "kind": "markdown",
-      "include": [".aneural/icebox/**/*.md", "**/icebox/*.md", "**/ICEBOX.md"],
+      "include": [
+        ".aneural/icebox/**/*.md",
+        "**/icebox/*.md",
+        "**/ICEBOX.md"
+      ],
       "granularity": "heading",
       "emit": {
         "node": {
           "kind": "Idea",
           "id": "idea:{file}#{slug(heading)}",
           "label": "{heading}",
-          "props": { "file": "{file}", "line": "{line}", "body": "{body}" }
+          "props": {
+            "file": "{file}",
+            "line": "{line}",
+            "body": "{body}"
+          }
         },
         "edges": [
-          { "kind": "RELATES_TO", "src": "$node", "dst": "file:{file}", "props": { "via": "source" } }
+          {
+            "kind": "RELATES_TO",
+            "src": "$node",
+            "dst": "file:{file}",
+            "props": {
+              "via": "source"
+            }
+          }
         ]
       },
-      "wikilinks": { "edgeKind": "RELATES_TO" }
+      "wikilinks": {
+        "edgeKind": "RELATES_TO"
+      }
     }
   ],
-  "panel": { "title": "Icebox", "columns": ["file", "line"] }
+  "panel": {
+    "title": "Icebox",
+    "columns": [
+      "file",
+      "line"
+    ]
+  }
 }

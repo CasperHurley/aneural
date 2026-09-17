@@ -18,6 +18,7 @@ dev = ["bevy/dynamic_linking"]
 [dependencies]
 aneural-core.workspace = true
 aneural-engine.workspace = true
+aneural-registry.workspace = true
 aneural-store.workspace = true
 aneural-icons = { workspace = true, features = ["raster"] }
 bevy = { workspace = true, features = [

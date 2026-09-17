@@ -1,0 +1,109 @@
+{
+  "$schema": "https://aneural.dev/schema/spore-v2.json",
+  "publisher": "aneural",
+  "name": "github",
+  "version": "0.1.0",
+  "displayName": "GitHub Pull Requests",
+  "description": "Open pull requests as nodes, joined to the files each one changes. The first spore that reaches off your machine: it needs a host allowlist and a token, and asks before either.",
+  "license": "MIT",
+  "repo": ".",
+  "homepage": "https://aneural.dev/spores/github",
+  "keywords": ["github", "pull-request", "review", "collaboration"],
+  "categories": ["Collaboration"],
+  "aneural": ">=0.1",
+  "capabilities": [
+    { "kind": "http", "hosts": ["api.github.com"] },
+    { "kind": "secret", "names": ["githubToken"], "hosts": ["api.github.com"] }
+  ],
+  "settings": [
+    {
+      "key": "repo",
+      "label": "Repository",
+      "description": "Which repository to watch, as owner/name.",
+      "example": "aneural/aneural",
+      "required": true
+    }
+  ],
+  "nodeTypes": [
+    {
+      "kind": "PullRequest",
+      "label": "Pull request",
+      "icon": "VsSourceControl",
+      "color": "#7aa2f7",
+      "shape": "hexagon",
+      "description": "An open pull request on the configured repository"
+    }
+  ],
+  "edgeTypes": [
+    {
+      "kind": "TOUCHES",
+      "label": "touches",
+      "style": "dashed",
+      "color": "#7aa2f7"
+    }
+  ],
+  "harvesters": [
+    {
+      "id": "open-pulls",
+      "kind": "http",
+      "request": {
+        "url": "https://api.github.com/repos/{setting.repo}/pulls?state=open&per_page=100&sort=updated&direction=desc",
+        "headers": {
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "Authorization": "Bearer {secret.githubToken}"
+        }
+      },
+      "select": "",
+      "maxPages": 2,
+      "refreshSeconds": 300,
+      "emit": {
+        "node": {
+          "kind": "PullRequest",
+          "id": "pull:{item.number}",
+          "label": "#{item.number} {item.title}",
+          "props": {
+            "number": "{item.number}",
+            "author": "{item.user.login}",
+            "draft": "{item.draft}",
+            "branch": "{item.head.ref}",
+            "base": "{item.base.ref}",
+            "url": "{item.html_url}",
+            "updatedAt": "{item.updated_at}",
+            "labels": "{item.labels.name}",
+            "readAt": "{readAt}"
+          }
+        },
+        "edges": []
+      },
+      "expand": {
+        "request": {
+          "url": "https://api.github.com/repos/{setting.repo}/pulls/{item.number}/files?per_page=100",
+          "headers": {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Authorization": "Bearer {secret.githubToken}"
+          }
+        },
+        "select": "",
+        "maxPages": 3,
+        "edges": [
+          {
+            "kind": "TOUCHES",
+            "src": "$parent",
+            "dst": "file:{item.filename}",
+            "props": {
+              "status": "{item.status}",
+              "additions": "{item.additions}",
+              "deletions": "{item.deletions}"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "panel": {
+    "title": "Pull requests",
+    "columns": ["number", "author", "branch", "updatedAt"]
+  }
+}

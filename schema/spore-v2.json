@@ -1,0 +1,815 @@
+{
+  "$defs": {
+    "Annotate": {
+      "properties": {
+        "edgeKind": {
+          "default": "ANNOTATES",
+          "type": "string"
+        },
+        "frontmatterKey": {
+          "default": "targets",
+          "description": "Frontmatter key holding a list of workspace-relative paths.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Capability": {
+      "description": "Something a spore needs from the host, declared up front so the user can see\nit before installing. The runners for everything above `Tier::Declarative`\nare not implemented yet; the vocabulary exists now so that consent does not\nhave to be redesigned when they land.",
+      "oneOf": [
+        {
+          "description": "Outbound HTTP to these hosts, and nowhere else.",
+          "properties": {
+            "hosts": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "http",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "hosts"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Outbound TCP to these `host:port` endpoints.",
+          "properties": {
+            "endpoints": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "tcp",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "endpoints"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Read these named secrets, and send them only to these hosts. Never the\nvalues in the manifest. `hosts` is what turns \"may read your token\"\ninto \"may read your token *for api.github.com*\": a secret can then be\nconsented to without also consenting to every host the spore reaches.",
+          "properties": {
+            "hosts": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "secret",
+              "type": "string"
+            },
+            "names": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "names"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Read nodes of these kinds back out of the graph.",
+          "properties": {
+            "kind": {
+              "const": "graph-read",
+              "type": "string"
+            },
+            "kinds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "kinds"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Write to these workspace-relative paths.",
+          "properties": {
+            "kind": {
+              "const": "fs-write",
+              "type": "string"
+            },
+            "paths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "paths"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Run these commands on the user's machine.",
+          "properties": {
+            "commands": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "subprocess",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "commands"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "EdgeTypeDef": {
+      "properties": {
+        "color": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "type": "string"
+        },
+        "style": {
+          "default": "solid",
+          "description": "`solid` | `dotted` | `dashed`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "Emit": {
+      "properties": {
+        "edges": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EmitEdge"
+          },
+          "type": "array"
+        },
+        "node": {
+          "$ref": "#/$defs/EmitNode"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "type": "object"
+    },
+    "EmitEdge": {
+      "properties": {
+        "dst": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "props": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "src": {
+          "description": "`$node` or an id template.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "src",
+        "dst"
+      ],
+      "type": "object"
+    },
+    "EmitNode": {
+      "properties": {
+        "id": {
+          "description": "Id template, e.g. `comment:{file}#{hash(text)}`.",
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "props": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "label"
+      ],
+      "type": "object"
+    },
+    "Expand": {
+      "description": "A follow-up request made once per record of the outer response.\n\nIt may only emit **edges**, never nodes. That is the whole point: the second\ncall is how a pull request finds the files it changes, and those files are\nalready nodes in the graph. Letting an API invent `file:` nodes for paths\nthat are not in the checkout would quietly fill the graph with things the\nuser does not have.\n\nIn here `{item.*}` is the *inner* record and `{parent.*}` the outer one;\n`$parent` is the node the outer record emitted.",
+      "properties": {
+        "edges": {
+          "description": "Edges joining `$parent` to whatever each inner record names.",
+          "items": {
+            "$ref": "#/$defs/EmitEdge"
+          },
+          "type": "array"
+        },
+        "maxPages": {
+          "default": 1,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "request": {
+          "$ref": "#/$defs/HttpRequest"
+        },
+        "select": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request",
+        "edges"
+      ],
+      "type": "object"
+    },
+    "Harvester": {
+      "description": "A harvester turns files into nodes and edges. Templates may reference\n`{file}` (workspace-relative path), `{line}`, named captures like `{text}`,\nand the functions `{hash(text)}` and `{slug(text)}`. `$node` inside an\nedge refers to the node emitted by the same harvester.",
+      "oneOf": [
+        {
+          "description": "Line-oriented regex over files matching `include` globs.",
+          "properties": {
+            "emit": {
+              "$ref": "#/$defs/Emit"
+            },
+            "exclude": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "id": {
+              "type": "string"
+            },
+            "include": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "regex",
+              "type": "string"
+            },
+            "pattern": {
+              "description": "Rust regex with named captures. Applied per line.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "pattern",
+            "emit"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "tree-sitter query over a supported language; captures become template vars.",
+          "properties": {
+            "emit": {
+              "$ref": "#/$defs/Emit"
+            },
+            "exclude": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "id": {
+              "type": "string"
+            },
+            "include": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "tree-sitter",
+              "type": "string"
+            },
+            "language": {
+              "type": "string"
+            },
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "language",
+            "query",
+            "emit"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Markdown documents or headings; also wiki-links and frontmatter targets.",
+          "properties": {
+            "annotate": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Annotate"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Emit edges from a frontmatter list of paths."
+            },
+            "emit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Emit"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Emit for each document/heading. Vars: `{file}`, `{title}`, `{heading}`,\n`{line}`, `{body}` plus frontmatter keys as `{fm.key}`."
+            },
+            "exclude": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "granularity": {
+              "$ref": "#/$defs/MarkdownGranularity",
+              "default": "document"
+            },
+            "id": {
+              "type": "string"
+            },
+            "include": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "markdown",
+              "type": "string"
+            },
+            "wikilinks": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WikiLinks"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Emit `RELATES_TO`-style edges for `[[Wiki Links]]`."
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Schema of a local SQLite database. Unlike every other kind this one is\ngiven the file's *path* rather than its bytes, so it can open a database\nfar larger than the engine is willing to read into memory.\n\nThe database is opened read-only; a spore can never write to it.",
+          "properties": {
+            "emit": {
+              "$ref": "#/$defs/Emit",
+              "description": "Emit for each table. Vars: `{file}`, `{table}`, `{columns}`,\n`{columnCount}`, `{rowCount}`, `{sql}`, `{mtime}`."
+            },
+            "exclude": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "id": {
+              "type": "string"
+            },
+            "include": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "sqlite",
+              "type": "string"
+            },
+            "references": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TableReferences"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Emit edges from a table to the tables its foreign keys point at."
+            },
+            "sample_rows": {
+              "description": "Rows to sample into a `sample` prop. Zero — the default — reads no\ndata at all. Anything above zero puts real rows into the graph, which\nthe MCP server then serves to a coding agent, so it is opt-in and\ncapped rather than unbounded.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "emit"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A JSON web API. The one harvester with no file behind it at all: it is\ndriven by a refresh interval rather than by the walker, and its nodes\nhang off a synthetic origin instead of a path.\n\nEverything about the request is declared here, so a T1 spore still ships\nno code. The host allowlist in the manifest's `capabilities` is what the\nuser consents to, and both this validator and the runner refuse a URL\nthat falls outside it.",
+          "properties": {
+            "emit": {
+              "$ref": "#/$defs/Emit",
+              "description": "Vars: `{item.<dotted.path>}` from each record, `{setting.<key>}`,\nand `{readAt}`."
+            },
+            "expand": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Expand"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A second request per record, for APIs that will not tell you in one\ncall what a record touches. One level only."
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "http",
+              "type": "string"
+            },
+            "max_pages": {
+              "default": 1,
+              "description": "Follow `Link: rel=\"next\"` at most this many times. One page only by\ndefault: a spore has to ask before it walks an entire API.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refresh_seconds": {
+              "default": 300,
+              "description": "How often to re-fetch. The floor is [`MIN_REFRESH_SECONDS`].",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "request": {
+              "$ref": "#/$defs/HttpRequest"
+            },
+            "select": {
+              "default": "",
+              "description": "RFC 6901 JSON pointer to the array of records in the response.\nEmpty means the body is itself the array.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "request",
+            "emit"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reserved for a future WASM component runtime.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "wasm",
+              "type": "string"
+            },
+            "module": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "module"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "HttpRequest": {
+      "description": "One declared request. `url` must be literal-hosted `https://`; only header\nvalues may carry a `{secret.*}`.",
+      "properties": {
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "MarkdownGranularity": {
+      "oneOf": [
+        {
+          "const": "document",
+          "description": "One node per document.",
+          "type": "string"
+        },
+        {
+          "const": "heading",
+          "description": "One node per `## heading` (level 2 by default).",
+          "type": "string"
+        }
+      ]
+    },
+    "NodeTypeDef": {
+      "description": "A full node type definition (`.aneural/nodes/<kind>.json`, spore manifests, builtins).",
+      "properties": {
+        "color": {
+          "default": "#9aa0a6",
+          "description": "Hex colour.",
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "icon": {
+          "default": "LuCircleDot",
+          "description": "icondata static name, e.g. `LuFolder`, `SiTypescript`.",
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "type": "string"
+        },
+        "provider": {
+          "description": "Who provides this kind: `builtin`, `workspace`, or `spore:<name>`.",
+          "type": "string"
+        },
+        "shape": {
+          "default": "circle",
+          "description": "`circle` | `hexagon` | `pill` | `square` | `diamond`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "Panel": {
+      "properties": {
+        "columns": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "type": "object"
+    },
+    "SettingDef": {
+      "description": "A value the user must supply before an HTTP harvester can run — the\nrepository to watch, the JIRA site, the project key. Declared so the\nmarketplace can ask for it instead of the spore silently fetching nothing.",
+      "properties": {
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "example": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
+    "TableReferences": {
+      "properties": {
+        "edgeKind": {
+          "default": "REFERENCES",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "WikiLinks": {
+      "properties": {
+        "edgeKind": {
+          "default": "RELATES_TO",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "$schema": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "aneural": {
+      "default": ">=0.1",
+      "description": "Required Aneural version range (semver).",
+      "type": "string"
+    },
+    "capabilities": {
+      "description": "What the spore needs from the host. Empty means it is purely\ndeclarative and needs nothing; see [`Tier`].",
+      "items": {
+        "$ref": "#/$defs/Capability"
+      },
+      "type": "array"
+    },
+    "categories": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "description": {
+      "default": "",
+      "type": "string"
+    },
+    "displayName": {
+      "default": "",
+      "type": "string"
+    },
+    "edgeTypes": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/EdgeTypeDef"
+      },
+      "type": "array"
+    },
+    "harvesters": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Harvester"
+      },
+      "type": "array"
+    },
+    "homepage": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "keywords": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "license": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Lowercase kebab-case identifier, unique within the publisher.",
+      "type": "string"
+    },
+    "nodeTypes": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/NodeTypeDef"
+      },
+      "type": "array"
+    },
+    "panel": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Panel"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "publisher": {
+      "default": "",
+      "description": "Lowercase kebab-case publisher, unique in the marketplace. Combined with\n`name` it forms the spore id (`acme.adr`). Empty for legacy v1 manifests,\nwhich are treated as unqualified.",
+      "type": "string"
+    },
+    "repo": {
+      "description": "Source repository, shown in the marketplace listing.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "settings": {
+      "description": "Values the user must fill in before the spore can do anything. An HTTP\nharvester is almost always parameterised by *whose* data to fetch.",
+      "items": {
+        "$ref": "#/$defs/SettingDef"
+      },
+      "type": "array"
+    },
+    "version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "version"
+  ],
+  "title": "SporeManifest",
+  "type": "object"
+}

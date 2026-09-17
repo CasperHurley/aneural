@@ -1,5 +1,6 @@
 {
-  "$schema": "https://aneural.dev/schema/spore-v1.json",
+  "$schema": "https://aneural.dev/schema/spore-v2.json",
+  "publisher": "aneural",
   "name": "plans",
   "version": "0.1.0",
   "displayName": "Plans",
@@ -17,29 +18,63 @@
     }
   ],
   "edgeTypes": [
-    { "kind": "ANNOTATES", "label": "annotates", "style": "dotted" },
-    { "kind": "RELATES_TO", "label": "relates to", "style": "dashed" }
+    {
+      "kind": "ANNOTATES",
+      "label": "annotates",
+      "style": "dotted"
+    },
+    {
+      "kind": "RELATES_TO",
+      "label": "relates to",
+      "style": "dashed"
+    }
   ],
   "harvesters": [
     {
       "id": "plan-docs",
       "kind": "markdown",
-      "include": [".aneural/plans/**/*.md", "**/.claude/plans/**/*.md", "**/docs/plans/**/*.md", "**/plans/*.md"],
+      "include": [
+        ".aneural/plans/**/*.md",
+        "**/.claude/plans/**/*.md",
+        "**/docs/plans/**/*.md",
+        "**/plans/*.md"
+      ],
       "granularity": "document",
       "emit": {
         "node": {
           "kind": "Plan",
           "id": "plan:{file}",
           "label": "{title}",
-          "props": { "file": "{file}", "status": "{fm.status}" }
+          "props": {
+            "file": "{file}",
+            "status": "{fm.status}"
+          }
         },
         "edges": [
-          { "kind": "RELATES_TO", "src": "$node", "dst": "file:{file}", "props": { "via": "source" } }
+          {
+            "kind": "RELATES_TO",
+            "src": "$node",
+            "dst": "file:{file}",
+            "props": {
+              "via": "source"
+            }
+          }
         ]
       },
-      "annotate": { "frontmatterKey": "targets", "edgeKind": "ANNOTATES" },
-      "wikilinks": { "edgeKind": "RELATES_TO" }
+      "annotate": {
+        "frontmatterKey": "targets",
+        "edgeKind": "ANNOTATES"
+      },
+      "wikilinks": {
+        "edgeKind": "RELATES_TO"
+      }
     }
   ],
-  "panel": { "title": "Plans", "columns": ["status", "file"] }
+  "panel": {
+    "title": "Plans",
+    "columns": [
+      "status",
+      "file"
+    ]
+  }
 }

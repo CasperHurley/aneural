@@ -195,6 +195,8 @@ pub struct NodeTypeDef {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SporeInfo {
+    /// `publisher.name`, the marketplace identity.
+    pub id: String,
     pub name: String,
     pub version: String,
     pub display_name: String,
@@ -203,6 +205,16 @@ pub struct SporeInfo {
     pub location: String,
     pub path: String,
     pub node_kinds: Vec<String>,
+    /// `declarative` | `http` | `sandboxed` | `native`.
+    pub tier: String,
+    #[napi(ts_type = "string[]")]
+    #[serde(default)]
+    pub consent_lines: Vec<String>,
+    #[napi(ts_type = "string[]")]
+    #[serde(default)]
+    pub missing_settings: Vec<String>,
+    #[serde(default)]
+    pub settings: Vec<SporeSetting>,
 }
 
 #[napi(object)]
@@ -457,6 +469,118 @@ pub fn write_focus(root: String, focus: Focus) -> Result<()> {
     ws(&root).write_focus(&f).map_err(err)
 }
 
+/// Everything a spore emitted over a fixture directory.
+#[napi(object)]
+pub struct HarvestResult {
+    pub nodes: serde_json::Value,
+    pub edges: serde_json::Value,
+}
+
+// ---- marketplace types -------------------------------------------------
+
+#[napi(object)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryStatus {
+    pub name: String,
+    pub url: String,
+    pub ok: bool,
+    pub spore_count: u32,
+    pub error: Option<String>,
+}
+
+#[napi(object)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub id: String,
+    pub publisher: String,
+    pub name: String,
+    pub version: String,
+    pub display_name: String,
+    pub description: String,
+    /// Which configured registry provided it.
+    pub registry: String,
+    /// Other registries that also list it, so a shadow is never invisible.
+    pub also_in: Vec<String>,
+    /// `declarative` | `http` | `sandboxed` | `native`.
+    pub tier: String,
+    pub node_kinds: Vec<String>,
+    pub first_party: bool,
+    pub score: u32,
+}
+
+#[napi(object)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallPlan {
+    pub id: String,
+    pub version: String,
+    pub display_name: String,
+    pub description: String,
+    pub registry: String,
+    pub repo: String,
+    pub tier: String,
+    pub requires_consent: bool,
+    /// Plain-English lines describing what the spore will be allowed to do.
+    pub consent_lines: Vec<String>,
+    pub previous_version: Option<String>,
+    pub node_kinds: Vec<String>,
+    pub readme: Option<String>,
+    pub first_party: bool,
+    /// Values this spore needs before it can do anything, straight from the
+    /// downloaded manifest rather than from the listing.
+    pub settings: Vec<SporeSetting>,
+    /// Declared secrets that are not resolvable in this environment.
+    pub missing_secrets: Vec<String>,
+}
+
+#[napi(object)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SporeSetting {
+    pub key: String,
+    pub label: String,
+    pub description: String,
+    pub example: Option<String>,
+    pub required: bool,
+    /// The value recorded in this workspace, if any.
+    pub value: Option<String>,
+}
+
+#[napi(object)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshResult {
+    pub harvesters: u32,
+    pub skipped: u32,
+    pub nodes: u32,
+    pub edges: u32,
+    pub problems: Vec<String>,
+}
+
+#[napi(object)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallResult {
+    pub id: String,
+    pub version: String,
+    pub dir: String,
+    pub tier: String,
+    pub enabled: bool,
+    pub previous_version: Option<String>,
+}
+
+#[napi(object)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SporeDrift {
+    pub id: String,
+    /// `modified` | `missing` | `notInLock` | `notInstalled`.
+    pub kind: String,
+    pub file: Option<String>,
+}
+
 // ---- schema ------------------------------------------------------------
 
 /// Builtin + spore + workspace node types with config overrides applied.
@@ -472,7 +596,7 @@ pub fn list_spores(root: String) -> Result<Vec<SporeInfo>> {
     convert(engine.spores())
 }
 
-/// Validate a `spore.json`; returns a list of problems (empty = valid).
+/// Validate a `spore.json`; returns every problem (empty = valid).
 #[napi]
 pub fn validate_spore(manifest_path: String) -> Result<Vec<String>> {
     let text = std::fs::read_to_string(&manifest_path).map_err(err)?;
@@ -480,11 +604,358 @@ pub fn validate_spore(manifest_path: String) -> Result<Vec<String>> {
         Ok(m) => m,
         Err(e) => return Ok(vec![format!("invalid JSON: {e}")]),
     };
-    let rel = manifest_path.clone();
-    match aneural_engine::spores::compile(manifest, "check", &rel, true) {
-        Ok(_) => Ok(vec![]),
-        Err(e) => Ok(vec![e.to_string()]),
+    Ok(aneural_engine::spores::compile_report(
+        manifest,
+        &manifest_path,
+    ))
+}
+
+/// Run one spore over a directory of fixture files and return everything it
+/// emitted. No workspace, no cache, no store — this is the tight loop a spore
+/// author (or an agent writing one) iterates in.
+#[napi]
+pub fn test_spore(manifest_path: String, fixtures_dir: String) -> Result<HarvestResult> {
+    let text = std::fs::read_to_string(&manifest_path).map_err(err)?;
+    let manifest: aneural_core::spore::SporeManifest =
+        serde_json::from_str(&text).map_err(|e| err(format!("invalid JSON: {e}")))?;
+    let spore =
+        aneural_engine::spores::compile(manifest, "check", &manifest_path, true).map_err(err)?;
+
+    let root = PathBuf::from(&fixtures_dir);
+    let mut files: Vec<(String, PathBuf)> = Vec::new();
+    collect_files(&root, &root, &mut files)?;
+    files.sort();
+
+    // Wiki-links resolve against the whole fixture set, so index it first.
+    let mut index = aneural_engine::spores::MarkdownIndex::default();
+    for (rel, _) in &files {
+        index.insert(rel);
     }
+
+    let spores = [spore];
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    for (rel, abs) in &files {
+        let bytes = std::fs::read(abs).unwrap_or_default();
+        let h = aneural_engine::spores::harvest_file(&spores, &index, rel, abs, &bytes);
+        nodes.extend(h.nodes);
+        edges.extend(h.edges);
+    }
+    // Deterministic order, so a snapshot diff means a real change.
+    nodes.sort_by(|a, b| a.id.cmp(&b.id));
+    edges.sort_by(|a, b| (&a.kind, &a.src, &a.dst).cmp(&(&b.kind, &b.src, &b.dst)));
+
+    Ok(HarvestResult {
+        nodes: serde_json::to_value(&nodes).map_err(err)?,
+        edges: serde_json::to_value(&edges).map_err(err)?,
+    })
+}
+
+fn collect_files(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<()> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_files(root, &path, out)?;
+        } else if let Ok(rel) = path.strip_prefix(root) {
+            out.push((rel.to_string_lossy().replace('\\', "/"), path.clone()));
+        }
+    }
+    Ok(())
+}
+
+// ---- marketplace -------------------------------------------------------
+
+fn federation(root: &str) -> Result<aneural_registry::Federation> {
+    let config = ws(root).load_config().map_err(err)?;
+    aneural_registry::federation(&config.spores).map_err(err)
+}
+
+/// Refresh every configured registry, reporting each one separately so a dead
+/// private index never hides the official one.
+#[napi]
+pub fn registry_refresh(root: String, force: Option<bool>) -> Result<Vec<RegistryStatus>> {
+    let statuses = federation(&root)?.refresh(force.unwrap_or(false));
+    Ok(statuses
+        .into_iter()
+        .map(|s| RegistryStatus {
+            name: s.name,
+            url: s.url,
+            ok: s.ok,
+            spore_count: s.spore_count as u32,
+            error: s.error,
+        })
+        .collect())
+}
+
+/// Search every configured registry. An empty query lists everything.
+#[napi]
+pub fn search_spores(root: String, query: String) -> Result<Vec<SearchHit>> {
+    let fed = federation(&root)?;
+    fed.refresh(false);
+    let indexes = fed.indexes();
+    let sources: Vec<aneural_registry::search::Source<'_>> = indexes
+        .iter()
+        .map(|(name, index)| aneural_registry::search::Source {
+            registry: name,
+            entries: &index.spores,
+        })
+        .collect();
+    aneural_registry::search(&sources, &query)
+        .into_iter()
+        .map(|h| {
+            Ok(SearchHit {
+                id: h.entry.id.clone(),
+                publisher: h.entry.publisher().to_string(),
+                name: h.entry.name().to_string(),
+                version: h.entry.version.clone(),
+                display_name: h.entry.display_name.clone(),
+                description: h.entry.description.clone(),
+                registry: h.registry,
+                also_in: h.also_in,
+                tier: h.entry.tier().label().to_string(),
+                node_kinds: h.entry.node_kinds.clone(),
+                first_party: h.entry.first_party,
+                score: h.score,
+            })
+        })
+        .collect()
+}
+
+/// Resolve, download and verify a spore without writing anything. The returned
+/// plan is what the consent sheet renders.
+#[napi]
+pub fn plan_install_spore(root: String, id: String) -> Result<InstallPlan> {
+    let fed = federation(&root)?;
+    fed.refresh(false);
+    let plan = aneural_registry::plan(Path::new(&root), &fed, &id).map_err(err)?;
+    Ok(InstallPlan {
+        id: plan.id.clone(),
+        version: plan.entry.version.clone(),
+        display_name: plan.manifest.display_name.clone(),
+        description: plan.manifest.description.clone(),
+        registry: plan.registry.clone(),
+        repo: plan.entry.repo.clone(),
+        tier: plan.tier.label().to_string(),
+        requires_consent: plan.requires_consent(),
+        consent_lines: plan.consent_lines(),
+        previous_version: plan.previous.clone(),
+        node_kinds: plan
+            .manifest
+            .node_types
+            .iter()
+            .map(|n| n.kind.clone())
+            .collect(),
+        readme: plan
+            .files
+            .get(aneural_registry::README_FILE)
+            .map(|b| String::from_utf8_lossy(b).to_string()),
+        first_party: plan.manifest.is_first_party(),
+        settings: {
+            // Anything the workspace already recorded, so re-installing does
+            // not look like it is asking for something it has.
+            let recorded = ws(&root)
+                .load_config()
+                .map(|c| c.spores.settings_for(&plan.id, plan.manifest.name.as_str()))
+                .unwrap_or_default();
+            plan.manifest
+                .settings
+                .iter()
+                .map(|d| SporeSetting {
+                    key: d.key.clone(),
+                    label: if d.label.is_empty() {
+                        d.key.clone()
+                    } else {
+                        d.label.clone()
+                    },
+                    description: d.description.clone(),
+                    example: d.example.clone(),
+                    required: d.required,
+                    value: recorded.get(&d.key).cloned(),
+                })
+                .collect()
+        },
+        missing_secrets: {
+            use aneural_core::net::{EnvSecrets, SecretStore};
+            let declared: Vec<String> = plan
+                .manifest
+                .capabilities
+                .iter()
+                .flat_map(|c| match c {
+                    aneural_core::spore::Capability::Secret { names, .. } => names.clone(),
+                    _ => Vec::new(),
+                })
+                .collect();
+            EnvSecrets.missing(&declared)
+        },
+    })
+}
+
+// ---- settings and refresh ---------------------------------------------
+
+/// Record (or, with a null value, clear) one of a spore's declared settings.
+#[napi]
+pub fn set_spore_setting(
+    root: String,
+    id: String,
+    key: String,
+    value: Option<String>,
+) -> Result<()> {
+    aneural_registry::set_setting(Path::new(&root), &id, &key, value.as_deref()).map_err(err)?;
+    Ok(())
+}
+
+/// The settings recorded for one spore in this workspace.
+#[napi]
+pub fn get_spore_settings(root: String, id: String) -> Result<serde_json::Value> {
+    let ws = ws(&root);
+    let config = ws.load_config().map_err(err)?;
+    let name = id.split_once('.').map(|(_, n)| n).unwrap_or(&id);
+    serde_json::to_value(config.spores.settings_for(&id, name)).map_err(err)
+}
+
+/// Re-fetch every HTTP harvester now, writing the results into the graph.
+///
+/// This is the one napi entry point that makes web requests, and it does so
+/// only because it explicitly hands the engine a fetcher. `indexWorkspace`,
+/// `queryNodes` and everything the MCP server calls do not.
+#[napi]
+pub fn refresh_spores(
+    root: String,
+    id: Option<String>,
+    force: Option<bool>,
+) -> Result<RefreshResult> {
+    let mut engine = open_engine(&root)?;
+    engine.set_fetcher(Box::new(aneural_registry::UreqFetcher::new()));
+    let stats = engine
+        .refresh_http(id.as_deref(), force.unwrap_or(true), &mut |_| {})
+        .map_err(err)?;
+    Ok(RefreshResult {
+        harvesters: stats.harvesters as u32,
+        skipped: stats.skipped as u32,
+        nodes: stats.nodes as u32,
+        edges: stats.edges as u32,
+        problems: stats.problems,
+    })
+}
+
+/// Install a spore the user has consented to. Re-resolves and re-verifies, so a
+/// stale plan can never be committed.
+#[napi]
+pub fn install_spore(root: String, id: String, enable: Option<bool>) -> Result<InstallResult> {
+    let fed = federation(&root)?;
+    fed.refresh(false);
+    let plan = aneural_registry::plan(Path::new(&root), &fed, &id).map_err(err)?;
+    let grants = aneural_registry::Grants {
+        capabilities: plan.manifest.capabilities.clone(),
+    };
+    let out = aneural_registry::commit(Path::new(&root), &plan, &grants, enable.unwrap_or(true))
+        .map_err(err)?;
+    Ok(InstallResult {
+        id: out.id,
+        version: out.version,
+        dir: out.dir.display().to_string(),
+        tier: out.tier.label().to_string(),
+        enabled: out.enabled,
+        previous_version: out.previous,
+    })
+}
+
+#[napi]
+pub fn uninstall_spore(root: String, id: String) -> Result<()> {
+    aneural_registry::uninstall(Path::new(&root), &id).map_err(err)
+}
+
+#[napi]
+pub fn set_spore_enabled(root: String, id: String, enabled: bool) -> Result<()> {
+    aneural_registry::set_enabled(Path::new(&root), &id, enabled).map_err(err)?;
+    Ok(())
+}
+
+/// Compare installed files against the lockfile.
+#[napi]
+pub fn verify_spores(root: String) -> Result<Vec<SporeDrift>> {
+    let lock = aneural_registry::Lockfile::load(Path::new(&root)).map_err(err)?;
+    Ok(lock
+        .verify(Path::new(&root))
+        .map_err(err)?
+        .into_iter()
+        .map(|d| {
+            use aneural_registry::Drift::*;
+            match d {
+                Modified { id, file } => SporeDrift {
+                    id,
+                    kind: "modified".into(),
+                    file: Some(file),
+                },
+                Missing { id, file } => SporeDrift {
+                    id,
+                    kind: "missing".into(),
+                    file: Some(file),
+                },
+                NotInLock { id } => SporeDrift {
+                    id,
+                    kind: "notInLock".into(),
+                    file: None,
+                },
+                NotInstalled { id } => SporeDrift {
+                    id,
+                    kind: "notInstalled".into(),
+                    file: None,
+                },
+            }
+        })
+        .collect())
+}
+
+/// Bring a v1 `spores` config block up to date. With `write: false` this only
+/// reports what would change, so reading never dirties the working tree.
+#[napi]
+pub fn migrate_spores_config(root: String, write: bool) -> Result<Vec<String>> {
+    let workspace = ws(&root);
+    let mut config = workspace.load_config().map_err(err)?;
+    let changes = config.spores.migrate(&aneural_registry::FIRST_PARTY_NAMES);
+    if write && !changes.is_empty() {
+        workspace.save_config(&config).map_err(err)?;
+    }
+    Ok(changes
+        .into_iter()
+        .map(|c| format!("{} -> {}", c.from, c.to))
+        .collect())
+}
+
+/// Validate a registry index file: structure, then fetch and verify every listed
+/// file, then cross-check each manifest against its listing. What registry CI runs.
+#[napi]
+pub fn validate_registry_index(index_path: String) -> Result<Vec<String>> {
+    let text = std::fs::read_to_string(&index_path).map_err(err)?;
+    let index: aneural_registry::Index =
+        serde_json::from_str(&text).map_err(|e| err(format!("invalid JSON: {e}")))?;
+
+    // Entries resolve relative to the index, so a registry can be checked from a
+    // checkout without publishing it anywhere first.
+    let path = PathBuf::from(&index_path);
+    let root = path.parent().map(PathBuf::from).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "index.json".into());
+    let client = aneural_registry::StaticIndex::new(
+        "check",
+        index_path.clone(),
+        aneural_registry::MixedTransport::new(root),
+    )
+    .fetching(name);
+
+    Ok(aneural_registry::index::validate_index(&index, &client))
+}
+
+/// The disclaimer every surface must show before installing third-party code.
+#[napi]
+pub fn marketplace_disclaimer() -> String {
+    aneural_registry::DISCLAIMER.to_string()
 }
 
 /// Re-run one spore's harvesters over every file it applies to.
@@ -598,6 +1069,9 @@ pub fn watch(
                     EngineEvent::Progress { phase, done, total } => serde_json::json!({ "type": "progress", "phase": phase, "done": done, "total": total }),
                     EngineEvent::IndexComplete(s) => serde_json::json!({ "type": "indexComplete", "stats": s }),
                     EngineEvent::Watching => serde_json::json!({ "type": "watching" }),
+                    EngineEvent::Spores { spores, errors } => {
+                        serde_json::json!({ "type": "spores", "spores": spores, "errors": errors })
+                    }
                     EngineEvent::Error(e) => serde_json::json!({ "type": "error", "message": e }),
                 };
                 if callback.call(value, ThreadsafeFunctionCallMode::NonBlocking) == Status::Closing {
@@ -619,5 +1093,7 @@ pub struct WatchEvent {
     pub done: Option<u32>,
     pub total: Option<u32>,
     pub stats: Option<serde_json::Value>,
+    pub spores: Option<serde_json::Value>,
+    pub errors: Option<Vec<String>>,
     pub message: Option<String>,
 }

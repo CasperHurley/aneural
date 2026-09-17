@@ -1,7 +1,9 @@
-//! Node visuals (circle mesh + icon sprite + label) and hyphae edge drawing.
+//! Node visuals (circle mesh + icon sprite + label), hyphae edge drawing, and
+//! the bioluminescence that comes over all of it after dark.
 
 use crate::camera::MainCamera;
-use crate::graph::{GraphEdge, GraphNode, GraphState, GrowIn, Hidden, Pos};
+use crate::circadian::Vibe;
+use crate::graph::{Drift, GraphEdge, GraphNode, GraphState, GrowIn, Hidden, Pos};
 use crate::picking::{Hovered, Selection};
 use crate::theme;
 use crate::workspace::{WorkspaceRes, node_radius};
@@ -18,6 +20,11 @@ pub struct IconAtlas {
     pub by_name: HashMap<&'static str, Handle<Image>>,
 }
 
+/// One soft radial falloff, shared by every node's halo, so the whole glow
+/// costs a single texture and batches as a single draw.
+#[derive(Resource, Default)]
+pub struct GlowTexture(pub Handle<Image>);
+
 #[derive(Resource, Default)]
 pub struct MeshCache {
     pub materials: HashMap<String, Handle<ColorMaterial>>,
@@ -26,29 +33,58 @@ pub struct MeshCache {
 #[derive(Component)]
 pub struct NodeLabel;
 
+/// The icon punched into a node's disc. It darkens as the disc brightens, so
+/// it stays legible against a glowing node.
+#[derive(Component)]
+pub struct NodeIcon;
+
 /// The node's disc, carrying the colour it is drawn in so that
-/// [`focus_context`] can put it back after fading it.
+/// [`node_colors`] can put it back after fading or lighting it.
 #[derive(Component)]
 pub struct NodeBody(pub Color);
 
+/// The halo behind a node: invisible by day, and after dark the light the
+/// node is giving off. Carries the node's daylight colour, so the halo can be
+/// relit from it as the night comes on.
+#[derive(Component)]
+pub struct GlowHalo(pub Color);
+
 #[derive(Component)]
 pub struct SelectionRing;
+
+/// Everything a node needs in order to be drawn for the first time. Bundled
+/// because a sprouting node wants five unrelated things and threading them
+/// one by one through the delta path buries the code that matters.
+pub struct Visuals<'a> {
+    pub meshes: &'a mut Assets<Mesh>,
+    pub materials: &'a mut Assets<ColorMaterial>,
+    pub atlas: &'a IconAtlas,
+    pub glow: &'a GlowTexture,
+    pub vibe: &'a Vibe,
+}
 
 pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<IconAtlas>()
+            .init_resource::<GlowTexture>()
             .init_resource::<MeshCache>()
-            .add_systems(Startup, (build_icon_atlas, hyphae_behind_nodes))
+            .add_systems(
+                Startup,
+                (build_icon_atlas, build_glow_texture, hyphae_behind_nodes),
+            )
             .add_systems(
                 Update,
                 (
-                    draw_edges,
+                    (draw_spore_motes, draw_edges).chain(),
+                    hidden_visibility,
                     label_visibility,
                     selection_ring,
                     hover_scale,
-                    focus_context,
+                    node_colors,
+                    night_chrome,
+                    breathe_halos,
                 ),
             );
     }
@@ -83,6 +119,36 @@ fn build_icon_atlas(mut atlas: ResMut<IconAtlas>, mut images: ResMut<Assets<Imag
     info!("rasterised {} icons", atlas.by_name.len());
 }
 
+/// White, with the alpha falling off from the middle. A sprite tinted with
+/// the node's colour then reads as that colour's light.
+fn build_glow_texture(mut glow: ResMut<GlowTexture>, mut images: ResMut<Assets<Image>>) {
+    const SIZE: usize = 96;
+    let mut data = vec![0u8; SIZE * SIZE * 4];
+    let centre = (SIZE as f32 - 1.0) / 2.0;
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let d = Vec2::new(x as f32 - centre, y as f32 - centre).length() / centre;
+            // A steep-ish falloff: a small bright core and a wide, very faint
+            // skirt, which is what a light source in fog actually looks like.
+            let a = (1.0 - d).clamp(0.0, 1.0).powf(2.6);
+            let i = (y * SIZE + x) * 4;
+            data[i..i + 3].fill(255);
+            data[i + 3] = (a * 255.0) as u8;
+        }
+    }
+    glow.0 = images.add(Image::new(
+        Extent3d {
+            width: SIZE as u32,
+            height: SIZE as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
+    ));
+}
+
 pub fn icon_for(node: &Node, ws: &WorkspaceRes) -> &'static str {
     if node.kind == "File"
         && let Some(p) = &node.path
@@ -97,15 +163,30 @@ pub fn spawn_node_visuals(
     entity: Entity,
     node: &Node,
     ws: &WorkspaceRes,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<ColorMaterial>,
-    atlas: &IconAtlas,
+    v: &mut Visuals,
 ) {
     let style = ws.style(&node.kind);
     let r = node_radius(&node.kind);
-    let mesh = meshes.add(shape_mesh(&style.shape, r));
-    let mat = materials.add(ColorMaterial::from_color(style.color));
+    let palette = &v.vibe.palette;
+    let mesh = v.meshes.add(shape_mesh(&style.shape, r));
+    let mat = v
+        .materials
+        .add(ColorMaterial::from_color(palette.bioluminesce(style.color)));
     let icon = icon_for(node, ws);
+    // Behind the disc, so the node sits in its own light rather than under it.
+    let halo = r * 4.0;
+    commands.spawn((
+        GlowHalo(style.color),
+        Sprite {
+            image: v.glow.0.clone(),
+            color: palette.glow(style.color).with_alpha(0.0),
+            custom_size: Some(Vec2::splat(halo)),
+            ..default()
+        },
+        Transform::from_xyz(0.0, 0.0, 0.25),
+        Visibility::Hidden,
+        ChildOf(entity),
+    ));
     let mut body = commands.spawn((
         NodeBody(style.color),
         Mesh2d(mesh),
@@ -113,12 +194,13 @@ pub fn spawn_node_visuals(
         Transform::from_xyz(0.0, 0.0, 1.0),
     ));
     body.insert(ChildOf(entity));
-    if let Some(img) = atlas.by_name.get(icon) {
+    if let Some(img) = v.atlas.by_name.get(icon) {
         let size = r * 1.2;
         commands.spawn((
+            NodeIcon,
             Sprite {
                 image: img.clone(),
-                color: theme::hex("#0d1210"),
+                color: palette.icon_ink,
                 custom_size: Some(Vec2::splat(size)),
                 ..default()
             },
@@ -138,7 +220,7 @@ pub fn spawn_node_visuals(
             font_size: FontSize::Px(11.0),
             ..default()
         },
-        TextColor(theme::hex(theme::TEXT)),
+        TextColor(palette.text),
         Transform::from_xyz(0.0, -(r + 9.0), 1.5),
         Visibility::Hidden,
         ChildOf(entity),
@@ -189,15 +271,33 @@ const PIXELS_PER_SAMPLE: f32 = 26.0;
 /// What a hypha fades to when something else has the focus.
 const GHOST: f32 = 0.05;
 
+/// How long one pulse takes to travel a hypha, at the fast and slow ends.
+/// Each hypha picks its own from its seed, so the mesh never flashes in time.
+const PULSE_SECONDS: (f32, f32) = (7.0, 14.0);
+/// How much of a hypha one pulse lights at a time.
+const PULSE_WIDTH: f32 = 0.16;
+
+/// Where a hypha's pulse is along its length right now, in a cycle that
+/// carries it off the far end and leaves a dark gap before the next.
+fn pulse_head(clock: f32, seed: u32) -> f32 {
+    let (fast, slow) = PULSE_SECONDS;
+    let cycle = fast + (slow - fast) * ((seed >> 7) % 1000) as f32 / 1000.0;
+    let phase = ((clock / cycle) + (seed % 1000) as f32 / 1000.0).fract();
+    // 0..1 of the cycle maps past both ends, so for most of it the hypha is dark
+    phase * 2.6 - 0.8
+}
+
+#[allow(clippy::too_many_arguments)]
 fn draw_edges(
     mut gizmos: Gizmos,
     edges: Query<(&GraphEdge, Option<&GrowIn>)>,
-    nodes: Query<(&Pos, Has<Hidden>), With<GraphNode>>,
+    nodes: Query<(&Pos, Option<&Drift>, Has<Hidden>), With<GraphNode>>,
     camera: Query<(&Transform, &Projection), With<MainCamera>>,
     graph: Res<GraphState>,
     filters: Res<crate::filters::Filters>,
     selection: Res<Selection>,
     hovered: Res<Hovered>,
+    vibe: Res<Vibe>,
 ) {
     let Ok((cam, Projection::Orthographic(ortho))) = camera.single() else {
         return;
@@ -206,6 +306,12 @@ fn draw_edges(
     let half = ortho.area.size() * 0.5 * 1.1;
     let (view_min, view_max) = (eye - half, eye + half);
     let scale = ortho.scale.max(1e-3);
+    let palette = &vibe.palette;
+    let night = palette.night;
+    // After dark the whole mesh dims and lifts together with the breath, and
+    // each hypha carries a slow pulse of light along itself.
+    let swell = 1.0 + 0.10 * night * vibe.breath();
+    let pulsing = night > 0.04;
 
     // Focus and context: with one node in hand its own hyphae stay lit and the
     // rest of the mesh drops to a whisper, so a single thread can be followed
@@ -233,13 +339,15 @@ fn draw_edges(
         if !lit && filters.decluttered(&e.kind, crowd) {
             continue;
         }
-        let (Ok((a, ha)), Ok((b, hb))) = (nodes.get(e.src), nodes.get(e.dst)) else {
+        let (Ok((a, da, ha)), Ok((b, db, hb))) = (nodes.get(e.src), nodes.get(e.dst)) else {
             continue;
         };
         if ha || hb {
             continue;
         }
-        let (a, b) = (a.0, b.0);
+        // The ends wander with the nodes, so a hypha stays rooted in both.
+        let drift = |d: Option<&Drift>| d.map(|d| d.offset).unwrap_or(Vec2::ZERO);
+        let (a, b) = (a.0 + drift(da), b.0 + drift(db));
 
         let len = (b - a).length();
         let pad = Vec2::splat(len * BOW);
@@ -251,13 +359,13 @@ fn draw_edges(
         let t = grow.map(|g| g.t).unwrap_or(1.0);
         let segments = ((len / scale / PIXELS_PER_SAMPLE).ceil() as usize).clamp(2, 20);
         let pts = hypha_points(a, b, e.seed, t, segments);
-        let base = theme::edge_color(&e.kind);
+        let base = palette.edge(&e.kind);
         let alpha = match (lit, focus.is_some(), structural) {
             (true, _, _) => 1.0,
             (false, true, _) => GHOST,
             (false, false, true) => 0.3,
             (false, false, false) => 0.4,
-        };
+        } * swell;
         // The glow doubles a hypha's ink, so it is spent only on the thread
         // the user is actually looking at.
         if lit {
@@ -266,27 +374,101 @@ fn draw_edges(
             gizmos.linestrip_2d(pts.iter().map(|p| *p + off), glow);
             gizmos.linestrip_2d(pts.iter().map(|p| *p - off), glow);
         }
-        gizmos.linestrip_2d(pts.iter().copied(), base.with_alpha(alpha));
+        let head = pulse_head(vibe.clock, e.seed);
+        // Most hyphae are between pulses at any moment; those cost nothing
+        // extra and are drawn flat.
+        if !pulsing || !(-PULSE_WIDTH * 3.0..1.0 + PULSE_WIDTH * 3.0).contains(&head) {
+            gizmos.linestrip_2d(pts.iter().copied(), base.with_alpha(alpha.min(1.0)));
+            continue;
+        }
+        let last = (pts.len() - 1).max(1) as f32;
+        gizmos.linestrip_gradient_2d(pts.iter().enumerate().map(|(i, p)| {
+            let u = (i as f32 / last) * t;
+            let g = (-((u - head) / PULSE_WIDTH).powi(2)).exp() * night;
+            (
+                *p,
+                theme::mix(base, palette.accent, g * 0.55)
+                    .with_alpha((alpha * (1.0 + g * 1.3)).min(1.0)),
+            )
+        }));
     }
 }
 
-/// Fade every node that is not the focused one or one of its neighbours. The
-/// canvas is black, so darkening towards it reads as a fade without paying for
-/// transparency on a thousand meshes.
-fn focus_context(
+/// How many motes drift across the canvas at the deepest point of the night.
+/// They are kept small and faint on purpose: a mote the size of a node is not
+/// atmosphere, it is a node the user cannot click.
+const MOTES: usize = 30;
+
+/// splitmix64's finaliser over an index and a salt, as a float in 0..1: a
+/// mote's whole character, without keeping anything between frames.
+fn rand01(i: usize, salt: u64) -> f32 {
+    let mut h = (i as u64 + 1)
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add(salt.wrapping_mul(0xBF58_476D_1CE4_E5B9));
+    h ^= h >> 29;
+    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    h ^= h >> 32;
+    (h >> 11) as f32 / (1u64 << 53) as f32
+}
+
+/// Spores in the air between the viewer and the mesh. They hang in front of
+/// the lens rather than in the world, so panning the graph does not shake
+/// them, and there is nothing to keep track of between frames.
+fn draw_spore_motes(
+    mut gizmos: Gizmos,
+    camera: Query<(&Transform, &Projection), With<MainCamera>>,
+    vibe: Res<Vibe>,
+) {
+    let night = vibe.palette.night;
+    if night < 0.06 {
+        return;
+    }
+    let Ok((cam, Projection::Orthographic(ortho))) = camera.single() else {
+        return;
+    };
+    let size = ortho.area.size();
+    let origin = cam.translation.truncate() - size * 0.5;
+    let count = (MOTES as f32 * night) as usize;
+    let t = vibe.clock;
+    for i in 0..count {
+        let (x0, y0, speed, size_seed) = (rand01(i, 1), rand01(i, 2), rand01(i, 3), rand01(i, 4));
+        // A slow rise with a lazy sideways sway, wrapped in the view: a spore
+        // that leaves the top comes back in at the bottom.
+        let rise = (y0 + t * (0.004 + 0.010 * speed)).fract();
+        let sway = (x0 + (t * 0.05 + y0 * std::f32::consts::TAU).sin() * 0.02).rem_euclid(1.0);
+        let p = origin + size * Vec2::new(sway, rise);
+        // Constant size on screen, whatever the zoom.
+        let r = (0.5 + 1.0 * size_seed) * ortho.scale;
+        let twinkle = 0.45 + 0.55 * ((t * 0.6 + size_seed * 20.0).sin() * 0.5 + 0.5);
+        let alpha = night * 0.12 * twinkle;
+        gizmos
+            .circle_2d(p, r, vibe.palette.accent.with_alpha(alpha))
+            .resolution(8);
+    }
+}
+
+/// Fade every node that is not the focused one or one of its neighbours, and
+/// light the rest by however much of the night there is. The canvas is black,
+/// so darkening towards it reads as a fade without paying for transparency on
+/// a thousand meshes.
+fn node_colors(
     selection: Res<Selection>,
     hovered: Res<Hovered>,
     graph: Res<GraphState>,
+    vibe: Res<Vibe>,
     bodies: Query<(&ChildOf, &NodeBody, &MeshMaterial2d<ColorMaterial>)>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    mut last: Local<Option<Entity>>,
+    mut last: Local<Option<(Option<Entity>, u8)>>,
 ) {
     let id = selection.primary.as_ref().or(hovered.0.as_ref());
     let focus = id.and_then(|id| graph.by_id.get(id)).copied();
-    if *last == focus {
+    // The night moves too slowly to repaint a thousand materials every frame;
+    // a step of it is a fine grain to notice.
+    let step = quantized_night(&vibe);
+    if *last == Some((focus, step)) {
         return;
     }
-    *last = focus;
+    *last = Some((focus, step));
 
     let mut keep = bevy::ecs::entity::EntityHashSet::default();
     if let (Some(f), Some(id)) = (focus, id) {
@@ -298,8 +480,9 @@ fn focus_context(
         }
     }
     for (parent, body, mat) in &bodies {
+        let lit = vibe.palette.bioluminesce(body.0);
         let faded = focus.is_some() && !keep.contains(&parent.parent());
-        let want = if faded { dimmed(body.0) } else { body.0 };
+        let want = if faded { dimmed(lit) } else { lit };
         // Moving from one node to its neighbour leaves almost every other node
         // exactly as it was, so look before writing: an untouched material is
         // not re-uploaded.
@@ -312,10 +495,103 @@ fn focus_context(
     }
 }
 
+/// The night in 1/48ths: the grain at which the palette is worth repainting.
+fn quantized_night(vibe: &Vibe) -> u8 {
+    (vibe.palette.night * 48.0).round() as u8
+}
+
+/// Labels, icons and the selection ring follow the palette. Like the node
+/// bodies, only when it has actually moved.
+fn night_chrome(
+    vibe: Res<Vibe>,
+    mut icons: Query<&mut Sprite, With<NodeIcon>>,
+    mut labels: Query<&mut TextColor, With<NodeLabel>>,
+    cache: Res<MeshCache>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut last: Local<Option<u8>>,
+) {
+    let step = quantized_night(&vibe);
+    if *last == Some(step) {
+        return;
+    }
+    *last = Some(step);
+    for mut sprite in &mut icons {
+        sprite.color = vibe.palette.icon_ink;
+    }
+    for mut label in &mut labels {
+        label.0 = vibe.palette.text;
+    }
+    if let Some(handle) = cache.materials.get("selection")
+        && let Some(mut m) = materials.get_mut(handle)
+    {
+        m.color = vibe.palette.selection;
+    }
+}
+
+/// The halo behind each node: dark and hidden by day, and after dark a glow
+/// that swells and settles on the breath rippling out across the graph.
+fn breathe_halos(
+    vibe: Res<Vibe>,
+    positions: Query<&Pos>,
+    mut halos: Query<(
+        &ChildOf,
+        &GlowHalo,
+        &mut Sprite,
+        &mut Transform,
+        &mut Visibility,
+    )>,
+    mut lit: Local<bool>,
+) {
+    let night = vibe.palette.night;
+    if night < 0.02 {
+        if !*lit {
+            return;
+        }
+        *lit = false;
+        for (_, _, _, _, mut visibility) in &mut halos {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
+    *lit = true;
+    for (parent, halo, mut sprite, mut transform, mut visibility) in &mut halos {
+        // A halo is spawned dark, and nodes keep sprouting long after the
+        // first frame, so this cannot be done once on the way into the night.
+        if *visibility != Visibility::Inherited {
+            *visibility = Visibility::Inherited;
+        }
+        let at = positions
+            .get(parent.parent())
+            .map(|p| p.0)
+            .unwrap_or_default();
+        let breath = vibe.breath_at(at);
+        sprite.color = vibe
+            .palette
+            .bioluminesce(halo.0)
+            .with_alpha(night * (0.30 + 0.13 * breath));
+        transform.scale = Vec3::splat(1.0 + 0.07 * night * breath);
+    }
+}
+
 /// Towards the black canvas, which on this background reads as a fade.
 fn dimmed(c: Color) -> Color {
     let s = c.to_srgba();
     Color::srgba(s.red * 0.22, s.green * 0.22, s.blue * 0.22, s.alpha)
+}
+
+/// `Hidden` is the marker the filters put on a node; this is what stops it
+/// being drawn — the disc, its icon, its label and its halo with it.
+fn hidden_visibility(mut nodes: Query<(&mut Visibility, Has<Hidden>), With<GraphNode>>) {
+    for (mut visibility, hidden) in &mut nodes {
+        let want = if hidden {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+        if *visibility != want {
+            *visibility = want;
+        }
+    }
 }
 
 fn label_visibility(
@@ -362,6 +638,7 @@ fn selection_ring(
     graph: Res<crate::graph::GraphState>,
     nodes: Query<(&Pos, &GraphNode)>,
     ring: Query<Entity, With<SelectionRing>>,
+    vibe: Res<Vibe>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut cache: ResMut<MeshCache>,
@@ -383,7 +660,7 @@ fn selection_ring(
     let mat = cache
         .materials
         .entry("selection".into())
-        .or_insert_with(|| materials.add(ColorMaterial::from_color(theme::hex(theme::SELECTION))))
+        .or_insert_with(|| materials.add(ColorMaterial::from_color(vibe.palette.selection)))
         .clone();
     commands.spawn((
         SelectionRing,
@@ -394,9 +671,13 @@ fn selection_ring(
     ));
 }
 
+/// A node grows under the cursor, and after dark every node rises and falls a
+/// little on the breath travelling out across the graph.
 fn hover_scale(
     hovered: Res<Hovered>,
     graph: Res<crate::graph::GraphState>,
+    vibe: Res<Vibe>,
+    positions: Query<&Pos>,
     mut bodies: Query<(&ChildOf, &mut Transform), With<NodeBody>>,
 ) {
     let target = hovered
@@ -404,12 +685,22 @@ fn hover_scale(
         .as_ref()
         .and_then(|id| graph.by_id.get(id))
         .copied();
+    let swell = 0.035 * vibe.palette.night;
     for (parent, mut t) in &mut bodies {
         let want = if Some(parent.parent()) == target {
             1.25
         } else {
             1.0
         };
-        t.scale = Vec3::splat(want);
+        let breath = if swell > 0.0005 {
+            let at = positions
+                .get(parent.parent())
+                .map(|p| p.0)
+                .unwrap_or_default();
+            1.0 + swell * vibe.breath_at(at)
+        } else {
+            1.0
+        };
+        t.scale = Vec3::splat(want * breath);
     }
 }

@@ -124,6 +124,9 @@ fn open_requested(world: &mut World) {
 
     let workspace = WorkspaceRes::new(ws, config, node_types);
     let title = format!("Aneural — {}", workspace.name());
+    world
+        .resource_mut::<crate::circadian::Vibe>()
+        .adopt(&workspace.config.gui.circadian);
     world.insert_resource(workspace);
     world.insert_resource(GraphState::default());
     world.insert_resource(PendingDeltas::default());

@@ -1,6 +1,6 @@
 //! In-memory graph ECS state and delta application.
 
-use crate::render::{IconAtlas, spawn_node_visuals};
+use crate::render::{Visuals, spawn_node_visuals};
 use crate::workspace::WorkspaceRes;
 use aneural_core::{Edge, GraphDelta, Node, NodeId};
 use bevy::ecs::entity::EntityHashMap;
@@ -30,6 +30,16 @@ pub struct Pos(pub Vec2);
 
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct Vel(pub Vec2);
+
+/// How far a node has wandered from the position the layout gave it, and the
+/// seed its wander is drawn from. Written by [`crate::circadian`] and added
+/// on top of [`Pos`] wherever a node is drawn; the layout and picking never
+/// see it, so the graph breathes without the simulation noticing.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct Drift {
+    pub seed: u32,
+    pub offset: Vec2,
+}
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Mass(pub f32);
@@ -161,14 +171,11 @@ pub fn seed_of(s: &str) -> u32 {
     (hash01(s, 7) * u32::MAX as f32) as u32
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn apply_delta(
     commands: &mut Commands,
     graph: &mut GraphState,
     ws: &WorkspaceRes,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<ColorMaterial>,
-    atlas: &IconAtlas,
+    v: &mut Visuals,
     existing: &mut Query<(&mut GraphNode, &Pos)>,
     delta: GraphDelta,
 ) {
@@ -185,9 +192,7 @@ pub fn apply_delta(
     }
     // nodes
     for node in delta.nodes {
-        upsert_node(
-            commands, graph, ws, meshes, materials, atlas, existing, node,
-        );
+        upsert_node(commands, graph, ws, v, existing, node);
     }
     // edges
     for edge in delta.edges {
@@ -220,14 +225,11 @@ fn parent_pos(
     existing.get(*e).ok().map(|(_, p)| p.0)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn upsert_node(
     commands: &mut Commands,
     graph: &mut GraphState,
     ws: &WorkspaceRes,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<ColorMaterial>,
-    atlas: &IconAtlas,
+    v: &mut Visuals,
     existing: &mut Query<(&mut GraphNode, &Pos)>,
     node: Node,
 ) {
@@ -263,13 +265,17 @@ fn upsert_node(
             gn,
             Pos(pos),
             Vel::default(),
+            Drift {
+                seed: seed_of(node.id.as_str()),
+                offset: Vec2::ZERO,
+            },
             Mass(mass),
             GrowIn::default(),
             Transform::from_translation(pos.extend(0.0)).with_scale(Vec3::splat(0.01)),
             Visibility::default(),
         ))
         .id();
-    spawn_node_visuals(commands, entity, &node, ws, meshes, materials, atlas);
+    spawn_node_visuals(commands, entity, &node, ws, v);
     graph.by_id.insert(node.id, entity);
     graph.node_count += 1;
 }
@@ -395,10 +401,12 @@ pub fn ease_out_back(t: f32) -> f32 {
     1.0 + c3 * (t - 1.0).powi(3) + c1 * (t - 1.0).powi(2)
 }
 
-/// Copy layout positions into transforms.
-pub fn sync_transforms(mut q: Query<(&Pos, &mut Transform), With<GraphNode>>) {
-    for (p, mut t) in &mut q {
-        t.translation.x = p.0.x;
-        t.translation.y = p.0.y;
+/// Copy layout positions into transforms, plus whatever the night has added
+/// to them.
+pub fn sync_transforms(mut q: Query<(&Pos, Option<&Drift>, &mut Transform), With<GraphNode>>) {
+    for (p, drift, mut t) in &mut q {
+        let at = p.0 + drift.map(|d| d.offset).unwrap_or(Vec2::ZERO);
+        t.translation.x = at.x;
+        t.translation.y = at.y;
     }
 }

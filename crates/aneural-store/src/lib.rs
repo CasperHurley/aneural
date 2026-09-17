@@ -303,6 +303,39 @@ impl Store {
         self.replace_origin(origin, &[], &[])
     }
 
+    /// Remove everything a single producer emitted, e.g. `spore:acme.adr`.
+    ///
+    /// Disabling a spore has to *retract* its nodes, not just stop making new
+    /// ones, and every node and edge already records which producer made it —
+    /// so this is a delete by `source` rather than a full reindex.
+    pub fn delete_by_source(&mut self, source: &str) -> Result<GraphDelta> {
+        let ids: Vec<NodeId> = {
+            let mut st = self
+                .conn
+                .prepare("SELECT id FROM nodes WHERE source = ?1")?;
+            let rows = st.query_map(params![source], |r| r.get::<_, String>(0))?;
+            rows.map(|r| r.map(NodeId::new))
+                .collect::<std::result::Result<_, _>>()?
+        };
+        let edges: Vec<Edge> = {
+            let mut st = self.conn.prepare(
+                "SELECT kind, src, dst, props, source, origin FROM edges WHERE source = ?1",
+            )?;
+            let rows = st.query_map(params![source], row_to_edge)?;
+            rows.collect::<std::result::Result<_, _>>()?
+        };
+
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM edges WHERE source = ?1", params![source])?;
+        tx.execute("DELETE FROM nodes WHERE source = ?1", params![source])?;
+        tx.commit()?;
+
+        let mut delta = GraphDelta::new(DeltaPhase::Live);
+        delta.removed_node_ids = ids;
+        delta.removed_edges = edges;
+        Ok(delta)
+    }
+
     /// Remove `Package` nodes with no incoming `DEPENDS_ON` edges.
     pub fn gc_orphan_packages(&mut self) -> Result<Vec<NodeId>> {
         let ids: Vec<NodeId> = {

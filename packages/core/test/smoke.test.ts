@@ -44,7 +44,12 @@ describe('@aneural/core', () => {
     );
     expect(core.getEdges(root, { src: 'file:apps/web/src/index.ts' }).length).toBeGreaterThan(1);
     expect(core.listNodeTypes(root).map((t) => t.kind)).toContain('Idea');
-    expect(core.listSpores(root)).toHaveLength(4);
+    const spores = core.listSpores(root);
+    // Four enabled by default, plus `database`, which ships off because it
+    // would walk every .db in the workspace.
+    expect(spores.map((s) => s.id)).toContain('aneural.comments');
+    expect(spores.find((s) => s.id === 'aneural.database')?.enabled).toBe(false);
+    expect(spores.filter((s) => s.enabled)).toHaveLength(4);
     expect(core.listIcons()).toContain('LuLeaf');
     expect(core.readFile(root, 'apps/web/src/types.ts', 1, 1)).toContain('interface Props');
     expect(() => core.readFile(root, '../outside')).toThrow();

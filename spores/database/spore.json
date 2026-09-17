@@ -1,0 +1,49 @@
+{
+  "$schema": "https://aneural.dev/schema/spore-v2.json",
+  "publisher": "aneural",
+  "name": "database",
+  "version": "0.1.0",
+  "displayName": "Local Databases",
+  "description": "Reads the schema of any SQLite database in your workspace: one Table node per table, with its columns, row count, and REFERENCES edges following the foreign keys.",
+  "license": "MIT",
+  "aneural": ">=0.1",
+  "keywords": ["database", "sqlite", "schema", "sql"],
+  "categories": ["data"],
+  "nodeTypes": [
+    {
+      "kind": "Table",
+      "label": "Table",
+      "icon": "LuDatabase",
+      "color": "#6ba8c9",
+      "shape": "square",
+      "description": "A table in a local SQLite database"
+    }
+  ],
+  "edgeTypes": [{ "kind": "REFERENCES", "label": "references", "style": "solid" }],
+  "harvesters": [
+    {
+      "id": "schema",
+      "kind": "sqlite",
+      "include": ["**/*.db", "**/*.sqlite", "**/*.sqlite3"],
+      "exclude": ["**/.aneural/**"],
+      "emit": {
+        "node": {
+          "kind": "Table",
+          "id": "aneural.database.table:{file}#{table}",
+          "label": "{table}",
+          "props": {
+            "file": "{file}",
+            "columns": "{columns}",
+            "columnCount": "{columnCount}",
+            "rowCount": "{rowCount}",
+            "readAt": "{mtime}",
+            "sql": "{sql}"
+          }
+        },
+        "edges": []
+      },
+      "references": { "edgeKind": "REFERENCES" }
+    }
+  ],
+  "panel": { "title": "Tables", "columns": ["table", "columns", "rowCount"] }
+}

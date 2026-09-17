@@ -1,6 +1,7 @@
 //! egui panels: top bar, filters, inspector, spores.
 
 use crate::camera::{CanvasRect, FrameRequest, PanGrab, UiCapture};
+use crate::circadian::Vibe;
 use crate::engine::IndexStatus;
 use crate::filters::Filters;
 use crate::focus::FocusState;
@@ -15,15 +16,24 @@ use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use std::collections::BTreeMap;
 
+fn own_the_primary_context(mut settings: ResMut<bevy_egui::EguiGlobalSettings>) {
+    settings.auto_create_primary_context = false;
+}
+
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(EguiPlugin::default())
+            // We put `PrimaryEguiContext` on the main camera ourselves
+            // (`camera.rs`), so bevy_egui must not also attach one: two
+            // contexts claiming `EguiPrimaryContextPass` is a panic.
+            .add_systems(PreStartup, own_the_primary_context)
             .init_resource::<PanelsOpen>()
+            .init_resource::<Styled>()
             .add_systems(
                 EguiPrimaryContextPass,
-                (style_once, panels, canvas_cursor).chain(),
+                (follow_palette, panels, canvas_cursor).chain(),
             );
     }
 }
@@ -56,26 +66,63 @@ impl Hand for egui::Response {
     }
 }
 
+/// The step of the night the panels were last painted at, so that a palette
+/// that moves over hours is not rebuilt sixty times a second.
 #[derive(Resource, Default)]
-struct Styled(bool);
+struct Styled(Option<u8>);
 
-fn style_once(mut contexts: EguiContexts, styled: Option<ResMut<Styled>>, mut commands: Commands) {
-    if styled.as_ref().is_some_and(|s| s.0) {
+/// The chrome follows the same clock the graph does: warm and matte through
+/// the day, cooler and wetter after dark.
+fn follow_palette(mut contexts: EguiContexts, vibe: Res<Vibe>, mut styled: ResMut<Styled>) {
+    let step = (vibe.palette.night * 48.0).round() as u8;
+    if styled.0 == Some(step) {
         return;
     }
     let Ok(ctx) = contexts.ctx_mut() else { return };
+    styled.0 = Some(step);
+    let p = &vibe.palette;
     let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = theme::egui_hex(theme::PANEL);
-    visuals.window_fill = theme::egui_hex(theme::PANEL);
-    visuals.override_text_color = Some(theme::egui_hex(theme::TEXT));
-    visuals.selection.bg_fill = theme::egui_hex(theme::DIM);
-    visuals.hyperlink_color = theme::egui_hex(theme::ACCENT);
-    visuals.widgets.active.bg_fill = theme::egui_hex(theme::DIM);
-    visuals.widgets.hovered.bg_fill = theme::egui_hex("#1c2a22");
+    visuals.panel_fill = theme::egui_color(p.panel);
+    visuals.window_fill = theme::egui_color(p.panel);
+    visuals.override_text_color = Some(theme::egui_color(p.text));
+    visuals.selection.bg_fill = theme::egui_color(p.dim);
+    visuals.hyperlink_color = theme::egui_color(p.accent);
+    visuals.widgets.active.bg_fill = theme::egui_color(p.dim);
+    visuals.widgets.hovered.bg_fill = theme::egui_color(p.hover);
     // a hand over anything clickable, the way a web app behaves
     visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
     ctx.set_visuals(visuals);
-    commands.insert_resource(Styled(true));
+}
+
+/// The hour of the day as the app is wearing it: a disc whose rays retract as
+/// the light goes and which a bite turns into a crescent. Clicking it decides
+/// how much of the clock the interface follows.
+fn time_of_day_dial(
+    ui: &mut egui::Ui,
+    night: f32,
+    color: egui::Color32,
+    behind: egui::Color32,
+) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(18.0, 16.0), egui::Sense::click());
+    let (c, r, day) = (rect.center(), 5.0, 1.0 - night);
+    let painter = ui.painter();
+    if day > 0.02 {
+        let reach = 1.6 + 2.4 * day;
+        let stroke = egui::Stroke::new(1.1, color.gamma_multiply(day));
+        for i in 0..8 {
+            let a = std::f32::consts::TAU * i as f32 / 8.0;
+            let dir = egui::vec2(a.cos(), a.sin());
+            painter.line_segment([c + dir * (r + 1.8), c + dir * (r + 1.8 + reach)], stroke);
+        }
+    }
+    painter.circle_filled(c, r, color);
+    // The bite slides in from the side: clear of the disc in daylight, most of
+    // the way across it in the small hours.
+    let bite = r * (2.0 - 1.15 * night);
+    if bite < r * 2.0 {
+        painter.circle_filled(c + egui::vec2(bite, -bite * 0.25), r, behind);
+    }
+    resp
 }
 
 /// splitmix64's finaliser: turns a counter into well-spread bits, so "every
@@ -249,12 +296,15 @@ fn panels(
     mut canvas: ResMut<CanvasRect>,
     mut open: ResMut<PanelsOpen>,
     mut open_request: ResMut<OpenRequest>,
+    mut vibe: ResMut<Vibe>,
     recents: Res<Recents>,
+    mut market: ResMut<crate::marketplace::Marketplace>,
     nodes: Query<(&GraphNode, Has<Hidden>)>,
     edges: Query<&GraphEdge>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
-    let accent = theme::egui_hex(theme::ACCENT);
+    let palette = vibe.palette;
+    let accent = theme::egui_color(palette.accent);
     let mut root = egui::Ui::new(
         ctx.clone(),
         "viewport".into(),
@@ -299,6 +349,20 @@ fn panels(
             }
             ui.label(egui::RichText::new("🍄 Aneural").color(accent).strong());
             workspace_menu(ui, &ws.name(), &recents, &mut open_request);
+            if ui
+                .button("spores")
+                .on_hover_text("Browse the Open Spores Marketplace")
+                .hand()
+                .clicked()
+            {
+                market.open = true;
+                if market.listings.is_empty() {
+                    market.state = crate::marketplace::MarketState::Loading;
+                    market
+                        .pending
+                        .push(crate::marketplace::worker::RegistryCommand::Refresh { force: false });
+                }
+            }
             ui.separator();
             // one indicator with two states: reading files, or idle and watching
             if status.busy {
@@ -326,7 +390,7 @@ fn panels(
             if let Some(err) = &status.last_error {
                 ui.label(
                     egui::RichText::new(format!("⚠ {err}"))
-                        .color(egui::Color32::from_rgb(230, 120, 90)),
+                        .color(theme::egui_color(palette.warning)),
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -337,6 +401,20 @@ fn panels(
                         .clicked()
                 {
                     open.right = true;
+                }
+                let dial = time_of_day_dial(
+                    ui,
+                    palette.night,
+                    accent,
+                    theme::egui_color(palette.panel),
+                );
+                if dial
+                    .on_hover_text(format!("{} — {}", vibe.phase(), vibe.mode.tip()))
+                    .hand()
+                    .clicked()
+                {
+                    let next = vibe.mode.next();
+                    vibe.set_mode(next);
                 }
             });
         });
@@ -376,7 +454,7 @@ fn panels(
                 let label = aneural_core::kinds::EdgeKind::label(kind);
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 4.0), egui::Sense::hover());
-                    ui.painter().rect_filled(rect, 1.0, theme::egui_color(theme::edge_color(kind)));
+                    ui.painter().rect_filled(rect, 1.0, theme::egui_color(palette.edge(kind)));
                     if ui.checkbox(&mut on, format!("{label} ({})", edge_counts.get(*kind).copied().unwrap_or(0))).hand().changed() {
                         filters.toggle_edge_kind(kind);
                     }
@@ -480,7 +558,7 @@ fn panels(
                                 let arrow = if outgoing { "→" } else { "←" };
                                 ui.horizontal(|ui| {
                                     let name = aneural_core::kinds::EdgeKind::label(&kind);
-                                    ui.label(egui::RichText::new(format!("{arrow} {name}")).color(theme::egui_color(theme::edge_color(&kind))).small());
+                                    ui.label(egui::RichText::new(format!("{arrow} {name}")).color(theme::egui_color(palette.edge(&kind))).small());
                                     if ui.link(label).clicked() {
                                         select_next = Some(other.clone());
                                     }

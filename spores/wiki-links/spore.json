@@ -1,5 +1,6 @@
 {
-  "$schema": "https://aneural.dev/schema/spore-v1.json",
+  "$schema": "https://aneural.dev/schema/spore-v2.json",
+  "publisher": "aneural",
   "name": "wiki-links",
   "version": "0.1.0",
   "displayName": "Notes & Wiki-links",
@@ -16,33 +17,59 @@
       "description": "A note kept in .aneural/notes"
     }
   ],
-  "edgeTypes": [{ "kind": "RELATES_TO", "label": "relates to", "style": "dashed" }],
+  "edgeTypes": [
+    {
+      "kind": "RELATES_TO",
+      "label": "relates to",
+      "style": "dashed"
+    }
+  ],
   "harvesters": [
     {
       "id": "notes",
       "kind": "markdown",
-      "include": [".aneural/notes/**/*.md"],
+      "include": [
+        ".aneural/notes/**/*.md"
+      ],
       "granularity": "document",
       "emit": {
         "node": {
           "kind": "Note",
           "id": "note:{file}",
           "label": "{title}",
-          "props": { "file": "{file}" }
+          "props": {
+            "file": "{file}"
+          }
         },
         "edges": [
-          { "kind": "RELATES_TO", "src": "$node", "dst": "file:{file}", "props": { "via": "source" } }
+          {
+            "kind": "RELATES_TO",
+            "src": "$node",
+            "dst": "file:{file}",
+            "props": {
+              "via": "source"
+            }
+          }
         ]
       },
-      "wikilinks": { "edgeKind": "RELATES_TO" }
+      "wikilinks": {
+        "edgeKind": "RELATES_TO"
+      }
     },
     {
       "id": "links",
       "kind": "markdown",
-      "include": ["**/*.md", "**/*.mdx"],
-      "exclude": [".aneural/notes/**"],
+      "include": [
+        "**/*.md",
+        "**/*.mdx"
+      ],
+      "exclude": [
+        ".aneural/notes/**"
+      ],
       "granularity": "document",
-      "wikilinks": { "edgeKind": "RELATES_TO" }
+      "wikilinks": {
+        "edgeKind": "RELATES_TO"
+      }
     }
   ]
 }

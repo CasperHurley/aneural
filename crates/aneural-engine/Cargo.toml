@@ -12,6 +12,7 @@ aneural-core.workspace = true
 aneural-store.workspace = true
 aneural-lang.workspace = true
 aneural-icons.workspace = true
+rusqlite.workspace = true
 ignore.workspace = true
 globset.workspace = true
 notify.workspace = true

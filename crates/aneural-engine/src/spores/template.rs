@@ -16,14 +16,22 @@ fn pattern() -> &'static Regex {
 
 /// Render a template. Unknown variables render as empty strings.
 pub fn render(template: &str, vars: &Vars) -> String {
+    render_with(template, vars, |_, value| value.to_string())
+}
+
+/// Render, passing every substituted value through `f` along with the variable
+/// name it came from. URLs use this to escape a value according to how much the
+/// value is trusted: a key the user typed into their own config is not the same
+/// as a string a remote API just handed back.
+pub fn render_with(template: &str, vars: &Vars, f: impl Fn(&str, &str) -> String) -> String {
     pattern()
         .replace_all(template, |caps: &regex::Captures<'_>| {
             let name = &caps[1];
             match caps.get(2) {
-                None => vars.get(name).cloned().unwrap_or_default(),
+                None => f(name, &vars.get(name).cloned().unwrap_or_default()),
                 Some(arg) => {
                     let value = vars.get(arg.as_str()).cloned().unwrap_or_default();
-                    apply(name, &value)
+                    f(arg.as_str(), &apply(name, &value))
                 }
             }
         })

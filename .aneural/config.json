@@ -43,13 +43,13 @@
       "plans",
       "icebox",
       "wiki-links"
-    ],
-    "registry": "https://raw.githubusercontent.com/aneural/spores/main/registry.json"
+    ]
   },
   "nodeTypes": {},
   "gui": {
     "theme": "mycelium-dark",
     "labelZoomThreshold": 0.8,
-    "growthBudgetPerFrame": 200
+    "growthBudgetPerFrame": 200,
+    "circadian": "auto"
   }
 }

@@ -1,10 +1,12 @@
 //! Spore loading and harvesting. First-party spores are embedded in the binary;
 //! workspace spores live in `.aneural/spores/<name>/spore.json`.
 
+pub mod http;
 pub mod markdown;
+pub mod sqlite;
 pub mod template;
 
-use aneural_core::config::NodeTypeDef;
+use aneural_core::config::{NodeTypeDef, SporesConfig};
 use aneural_core::kinds::Source;
 use aneural_core::spore::{Emit, Harvester, MarkdownGranularity, SporeInfo, SporeManifest};
 use aneural_core::{Edge, Node, NodeId, Workspace};
@@ -29,12 +31,24 @@ pub const BUILTIN_SPORES: &[(&str, &str)] = &[
         "wiki-links",
         include_str!("../../../../spores/wiki-links/spore.json"),
     ),
+    // Off by default: it walks every `.db` in the workspace, which is worth
+    // opting into rather than assuming.
+    (
+        "database",
+        include_str!("../../../../spores/database/spore.json"),
+    ),
+    // Off by default, and the only shipped spore that needs consent: it makes
+    // web requests with the user's own GitHub token.
+    (
+        "github",
+        include_str!("../../../../spores/github/spore.json"),
+    ),
 ];
 
 #[derive(Debug, thiserror::Error)]
 pub enum SporeError {
-    #[error("{name}: {message}")]
-    Invalid { name: String, message: String },
+    #[error("{name}: {}", problems.join("; "))]
+    Invalid { name: String, problems: Vec<String> },
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
     #[error("json: {0}")]
@@ -58,8 +72,42 @@ struct CompiledHarvester {
 }
 
 impl Spore {
+    /// A summary for the CLI, the GUI and MCP. `settings` is the workspace's
+    /// answers, so the caller learns which required ones are still blank.
+    pub fn info_with(&self, settings: &BTreeMap<String, String>) -> SporeInfo {
+        let mut info = self.info();
+        info.settings = self
+            .manifest
+            .settings
+            .iter()
+            .map(|d| aneural_core::spore::SettingValue {
+                key: d.key.clone(),
+                label: if d.label.is_empty() {
+                    d.key.clone()
+                } else {
+                    d.label.clone()
+                },
+                description: d.description.clone(),
+                example: d.example.clone(),
+                required: d.required,
+                value: settings
+                    .get(&d.key)
+                    .filter(|v| !v.trim().is_empty())
+                    .cloned(),
+            })
+            .collect();
+        info.missing_settings = info
+            .settings
+            .iter()
+            .filter(|s| s.required && s.value.is_none())
+            .map(|s| s.key.clone())
+            .collect();
+        info
+    }
+
     pub fn info(&self) -> SporeInfo {
         SporeInfo {
+            id: self.manifest.id(),
             name: self.manifest.name.clone(),
             version: self.manifest.version.clone(),
             display_name: if self.manifest.display_name.is_empty() {
@@ -77,6 +125,15 @@ impl Spore {
                 .iter()
                 .map(|n| n.kind.clone())
                 .collect(),
+            tier: self.manifest.tier().label().to_string(),
+            consent_lines: self
+                .manifest
+                .capabilities
+                .iter()
+                .map(|c| c.consent_line())
+                .collect(),
+            missing_settings: Vec::new(),
+            settings: Vec::new(),
         }
     }
 
@@ -86,13 +143,22 @@ impl Spore {
             .iter()
             .cloned()
             .map(|mut d| {
-                d.provider = Source::spore(&self.manifest.name);
+                d.provider = Source::spore(&self.manifest.id());
                 if d.label.is_empty() {
                     d.label = d.kind.clone();
                 }
                 d
             })
             .collect()
+    }
+
+    /// This spore's HTTP harvesters. They are not reachable through the
+    /// file-driven path at all, so the refresh loop asks for them by name.
+    pub fn http_harvesters(&self) -> impl Iterator<Item = &Harvester> {
+        self.harvesters
+            .iter()
+            .map(|h| &h.def)
+            .filter(|d| matches!(d, Harvester::Http { .. }))
     }
 
     /// Whether any harvester of this spore applies to the given path.
@@ -103,10 +169,20 @@ impl Spore {
 
 impl CompiledHarvester {
     fn matches(&self, rel: &str) -> bool {
+        // An HTTP harvester declares no `include`, and an empty include set
+        // means "every file" for the file-driven kinds — so it has to be ruled
+        // out explicitly or it would claim every path in the workspace.
+        if matches!(self.def, Harvester::Http { .. }) {
+            return false;
+        }
         let inc = self.include.is_empty() || self.include.is_match(rel);
         inc && !self.exclude.is_match(rel)
     }
 }
+
+/// `compile` needs a `&Vec<String>` to hand the glob builder for the kinds that
+/// declare no globs at all.
+static EMPTY: Vec<String> = Vec::new();
 
 /// Compile a manifest; returns human-readable errors for bad globs/regexes.
 pub fn compile(
@@ -130,7 +206,13 @@ pub fn compile(
             }
             | Harvester::Markdown {
                 include, exclude, ..
+            }
+            | Harvester::Sqlite {
+                include, exclude, ..
             } => (include, exclude, None),
+            // An HTTP harvester has no file behind it, so it has no globs. It
+            // is still compiled in, because the refresh loop has to find it.
+            Harvester::Http { .. } => (&EMPTY, &EMPTY, None),
             Harvester::Wasm { .. } => continue,
         };
         let include = match globset(include) {
@@ -167,7 +249,7 @@ pub fn compile(
     if !errs.is_empty() {
         return Err(SporeError::Invalid {
             name: manifest.name.clone(),
-            message: errs.join("; "),
+            problems: errs,
         });
     }
     Ok(Spore {
@@ -177,6 +259,16 @@ pub fn compile(
         enabled,
         harvesters,
     })
+}
+
+/// Every problem with a manifest, not just the first. `compile` collapses them
+/// into one error for logging; callers that show a user a list want them apart.
+pub fn compile_report(manifest: SporeManifest, path: &str) -> Vec<String> {
+    match compile(manifest, "check", path, true) {
+        Ok(_) => Vec::new(),
+        Err(SporeError::Invalid { problems, .. }) => problems,
+        Err(e) => vec![e.to_string()],
+    }
 }
 
 pub fn globset(patterns: &[String]) -> Result<GlobSet, globset::Error> {
@@ -193,7 +285,9 @@ pub fn load_all(ws: &Workspace, enabled: &[String]) -> (Vec<Spore>, Vec<SporeErr
     let mut errors = Vec::new();
     for (name, json) in BUILTIN_SPORES {
         let manifest: SporeManifest = serde_json::from_str(json).expect("builtin spore json");
-        let on = enabled.iter().any(|e| e == name);
+        let on = enabled
+            .iter()
+            .any(|e| SporesConfig::entry_matches(e, &manifest.id(), name));
         match compile(
             manifest,
             "builtin",
@@ -229,16 +323,21 @@ pub fn load_all(ws: &Workspace, enabled: &[String]) -> (Vec<Spore>, Vec<SporeErr
                 Err(e) => {
                     errors.push(SporeError::Invalid {
                         name: rel.clone(),
-                        message: e.to_string(),
+                        problems: vec![e.to_string()],
                     });
                     continue;
                 }
             };
-            let on = enabled.iter().any(|e| e == &manifest.name);
+            let on = enabled
+                .iter()
+                .any(|e| SporesConfig::entry_matches(e, &manifest.id(), &manifest.name));
             match compile(manifest, "workspace", &rel, on) {
                 Ok(s) => {
-                    // workspace spores shadow builtins of the same name
-                    spores.retain(|b: &Spore| b.manifest.name != s.manifest.name);
+                    // A workspace spore shadows a builtin only when it is the
+                    // same spore: `bob.comments` must not displace
+                    // `aneural.comments` just by sharing a name.
+                    let id = s.manifest.id();
+                    spores.retain(|b: &Spore| b.manifest.id() != id);
                     spores.push(s);
                 }
                 Err(e) => errors.push(e),
@@ -296,6 +395,55 @@ fn stem_of(rel: &str) -> Option<String> {
     Some(stem.to_lowercase())
 }
 
+/// Whether a harvester opens the file itself rather than being handed its bytes.
+/// These run even for files too large for the engine to read.
+pub fn opens_its_own_file(h: &Harvester) -> bool {
+    matches!(h, Harvester::Sqlite { .. })
+}
+
+/// Run only the harvesters that open the file themselves. Used for files past
+/// `walk::MAX_PARSE_BYTES`, where a dev database routinely lands.
+pub fn harvest_large(spores: &[Spore], rel: &str, abs: &std::path::Path) -> Harvest {
+    let mut out = Harvest::default();
+    for spore in spores.iter().filter(|s| s.enabled) {
+        let src = Source::spore(&spore.manifest.id());
+        for h in spore
+            .harvesters
+            .iter()
+            .filter(|h| opens_its_own_file(&h.def) && h.matches(rel))
+        {
+            if let Harvester::Sqlite {
+                emit,
+                references,
+                sample_rows,
+                ..
+            } = &h.def
+            {
+                sqlite::harvest(
+                    abs,
+                    rel,
+                    emit,
+                    references.as_ref(),
+                    *sample_rows,
+                    &src,
+                    &mut out,
+                );
+            }
+        }
+    }
+    dedupe(&mut out);
+    out
+}
+
+/// Whether any enabled spore would harvest this path without reading it.
+pub fn has_large_file_harvester(spores: &[Spore], rel: &str) -> bool {
+    spores.iter().filter(|s| s.enabled).any(|s| {
+        s.harvesters
+            .iter()
+            .any(|h| opens_its_own_file(&h.def) && h.matches(rel))
+    })
+}
+
 /// Output of harvesting one file with one or more spores.
 #[derive(Default, Debug)]
 pub struct Harvest {
@@ -308,12 +456,13 @@ pub fn harvest_file(
     spores: &[Spore],
     md_index: &MarkdownIndex,
     rel: &str,
+    abs: &std::path::Path,
     source: &[u8],
 ) -> Harvest {
     let mut out = Harvest::default();
     let text = String::from_utf8_lossy(source);
     for spore in spores.iter().filter(|s| s.enabled) {
-        let src = Source::spore(&spore.manifest.name);
+        let src = Source::spore(&spore.manifest.id());
         for h in spore.harvesters.iter().filter(|h| h.matches(rel)) {
             match &h.def {
                 Harvester::Regex { emit, .. } => {
@@ -347,7 +496,24 @@ pub fn harvest_file(
                         &mut out,
                     );
                 }
-                Harvester::Wasm { .. } => {}
+                Harvester::Sqlite {
+                    emit,
+                    references,
+                    sample_rows,
+                    ..
+                } => {
+                    sqlite::harvest(
+                        abs,
+                        rel,
+                        emit,
+                        references.as_ref(),
+                        *sample_rows,
+                        &src,
+                        &mut out,
+                    );
+                }
+                // Driven by the refresh loop, not by the walker.
+                Harvester::Http { .. } | Harvester::Wasm { .. } => {}
             }
         }
     }
@@ -369,7 +535,7 @@ fn dedupe(h: &mut Harvest) {
     });
 }
 
-fn base_vars(rel: &str) -> Vars {
+pub(crate) fn base_vars(rel: &str) -> Vars {
     let mut v = Vars::new();
     v.insert("file".into(), rel.to_string());
     v.insert(
@@ -379,7 +545,7 @@ fn base_vars(rel: &str) -> Vars {
     v
 }
 
-fn emit_node(
+pub(crate) fn emit_node(
     emit: &Emit,
     source: &str,
     rel: &str,
@@ -580,6 +746,80 @@ fn harvest_markdown(
 mod tests {
     use super::*;
 
+    /// Write a workspace spore and load everything with the given `enabled` list.
+    fn load_with(enabled: &[&str], extra: &[(&str, &str)]) -> (Vec<Spore>, Vec<SporeError>) {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = Workspace::at(tmp.path());
+        ws.init(Some("t"), false).unwrap();
+        for (dir, json) in extra {
+            let d = ws.spores_dir().join(dir);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("spore.json"), json).unwrap();
+        }
+        let enabled: Vec<String> = enabled.iter().map(|s| s.to_string()).collect();
+        load_all(&ws, &enabled)
+    }
+
+    fn is_on(spores: &[Spore], id: &str) -> bool {
+        spores.iter().any(|s| s.manifest.id() == id && s.enabled)
+    }
+
+    #[test]
+    fn builtins_are_first_party_and_enable_by_bare_or_qualified_name() {
+        let (spores, errs) = load_with(&["comments", "aneural.plans"], &[]);
+        assert!(errs.is_empty(), "{errs:?}");
+
+        // The bare name is what every existing workspace has on disk.
+        assert!(is_on(&spores, "aneural.comments"));
+        // The qualified id is what new workspaces write.
+        assert!(is_on(&spores, "aneural.plans"));
+        assert!(!is_on(&spores, "aneural.icebox"));
+    }
+
+    #[test]
+    fn a_third_party_spore_cannot_shadow_a_builtin_by_name() {
+        // Same `name`, different publisher: it must load *alongside*
+        // `aneural.comments`, not replace it.
+        let impostor = r##"{
+          "publisher": "bob", "name": "comments", "version": "0.1.0",
+          "displayName": "Not the real one", "description": "d",
+          "nodeTypes": [{ "kind": "BobComment", "icon": "LuCircleDot", "color": "#fff" }],
+          "harvesters": [{
+            "id": "h", "kind": "markdown", "include": ["**/*.md"],
+            "emit": { "node": { "kind": "BobComment", "id": "bob.comments.item:{file}", "label": "{title}" }, "edges": [] }
+          }]
+        }"##;
+        let (spores, errs) =
+            load_with(&["comments", "bob.comments"], &[("bob-comments", impostor)]);
+        assert!(errs.is_empty(), "{errs:?}");
+
+        assert!(is_on(&spores, "aneural.comments"), "the builtin survives");
+        assert!(is_on(&spores, "bob.comments"), "and the impostor loads too");
+    }
+
+    #[test]
+    fn a_workspace_spore_still_shadows_the_builtin_it_replaces() {
+        let fork = r##"{
+          "publisher": "aneural", "name": "comments", "version": "9.9.9",
+          "displayName": "Local fork", "description": "d",
+          "nodeTypes": [{ "kind": "Comment", "icon": "LuCircleDot", "color": "#fff" }],
+          "harvesters": [{
+            "id": "h", "kind": "markdown", "include": ["**/*.md"],
+            "emit": { "node": { "kind": "Comment", "id": "comment:{file}", "label": "{title}" }, "edges": [] }
+          }]
+        }"##;
+        let (spores, errs) = load_with(&["aneural.comments"], &[("comments", fork)]);
+        assert!(errs.is_empty(), "{errs:?}");
+
+        let loaded: Vec<&Spore> = spores
+            .iter()
+            .filter(|s| s.manifest.id() == "aneural.comments")
+            .collect();
+        assert_eq!(loaded.len(), 1, "exactly one wins");
+        assert_eq!(loaded[0].manifest.version, "9.9.9");
+        assert_eq!(loaded[0].location, "workspace");
+    }
+
     fn builtins() -> Vec<Spore> {
         BUILTIN_SPORES
             .iter()
@@ -592,15 +832,22 @@ mod tests {
     #[test]
     fn builtin_spores_compile() {
         let s = builtins();
-        assert_eq!(s.len(), 4);
+        assert_eq!(s.len(), BUILTIN_SPORES.len());
         assert!(s.iter().any(|s| s.manifest.name == "comments"));
+        assert!(s.iter().all(|s| s.manifest.is_first_party()));
     }
 
     #[test]
     fn comments_harvest() {
         let spores = builtins();
         let src = b"const a = 1; // TODO: make it two\n# not code\n/* FIXME slow */\n// claude: keep this\n";
-        let h = harvest_file(&spores, &MarkdownIndex::default(), "src/a.ts", src);
+        let h = harvest_file(
+            &spores,
+            &MarkdownIndex::default(),
+            "src/a.ts",
+            std::path::Path::new("src/a.ts"),
+            src,
+        );
         let labels: Vec<_> = h.nodes.iter().map(|n| n.label.as_str()).collect();
         assert_eq!(labels, vec!["make it two", "slow", "keep this"]);
         assert_eq!(h.nodes[0].props["tag"], "TODO");
@@ -621,7 +868,13 @@ mod tests {
         idx.insert(".aneural/icebox/ideas.md");
 
         let plan = b"---\ntitle: Plan A\nstatus: open\ntargets:\n  - apps/web/src/index.ts\n---\nSee [[Architecture]]\n";
-        let h = harvest_file(&spores, &idx, ".aneural/plans/p.md", plan);
+        let h = harvest_file(
+            &spores,
+            &idx,
+            ".aneural/plans/p.md",
+            std::path::Path::new(".aneural/plans/p.md"),
+            plan,
+        );
         let plan_node = h.nodes.iter().find(|n| n.kind == "Plan").unwrap();
         assert_eq!(plan_node.id, NodeId::new("plan:.aneural/plans/p.md"));
         assert_eq!(plan_node.label, "Plan A");
@@ -644,7 +897,13 @@ mod tests {
 
         let ice =
             b"# Icebox\n\n## Replace router\nSee [[README]].\n\n## Rate limit\n\n## Rate limit\n";
-        let h = harvest_file(&spores, &idx, ".aneural/icebox/ideas.md", ice);
+        let h = harvest_file(
+            &spores,
+            &idx,
+            ".aneural/icebox/ideas.md",
+            std::path::Path::new(".aneural/icebox/ideas.md"),
+            ice,
+        );
         let ideas: Vec<_> = h.nodes.iter().filter(|n| n.kind == "Idea").collect();
         assert_eq!(ideas.len(), 3);
         assert_eq!(
@@ -657,7 +916,13 @@ mod tests {
             && e.props["via"] == "wikilink"));
 
         let note = b"# Architecture\n\nBack to [[README]] and [[Missing]].\n";
-        let h = harvest_file(&spores, &idx, ".aneural/notes/Architecture.md", note);
+        let h = harvest_file(
+            &spores,
+            &idx,
+            ".aneural/notes/Architecture.md",
+            std::path::Path::new(".aneural/notes/Architecture.md"),
+            note,
+        );
         let n = h.nodes.iter().find(|n| n.kind == "Note").unwrap();
         assert_eq!(n.label, "Architecture");
         assert_eq!(
@@ -667,6 +932,40 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn the_database_spore_harvests_a_real_sqlite_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join("app.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);
+             CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id));",
+        )
+        .unwrap();
+        drop(conn);
+
+        let spores = builtins();
+        let h = harvest_file(&spores, &MarkdownIndex::default(), "app.db", &db, b"");
+
+        let tables: Vec<&str> = h
+            .nodes
+            .iter()
+            .filter(|n| n.kind == "Table")
+            .map(|n| n.label.as_str())
+            .collect();
+        assert_eq!(tables, vec!["posts", "users"]);
+
+        let posts = h.nodes.iter().find(|n| n.label == "posts").unwrap();
+        assert_eq!(posts.props["columns"], "id, user_id");
+        assert_eq!(posts.props["rowCount"], 0);
+        assert!(posts.props.get("sample").is_none(), "rows stay opt-in");
+        assert_eq!(posts.origin.as_deref(), Some("app.db"));
+
+        assert!(h.edges.iter().any(|e| e.kind == "REFERENCES"
+            && e.src == NodeId::new("aneural.database.table:app.db#posts")
+            && e.dst == NodeId::new("aneural.database.table:app.db#users")));
     }
 
     #[test]

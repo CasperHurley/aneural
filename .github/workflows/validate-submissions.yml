@@ -1,0 +1,37 @@
+name: validate submissions
+
+# A listing is a pull request against registry/index.json. This is the whole
+# review pipeline for a third-party spore: nobody's code is hosted here, so
+# what merges is a location and a set of hashes, and this job proves that
+# what those hashes pin is what the listing claims.
+on:
+  pull_request:
+    paths: ['registry/index.json']
+
+jobs:
+  entries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @aneural/core build:debug
+      - run: pnpm --filter @aneural/mcp build
+      - run: pnpm --filter aneural build
+
+      # Structural checks, then every listed file is fetched from the repo it
+      # names and hashed. An entry whose sha256 does not match what its repo
+      # actually serves never merges.
+      #
+      # This also cross-checks each manifest against its listing: a listing that
+      # advertises fewer capabilities than the spore asks for is how one would
+      # slip past the consent sheet, so it is a hard failure here as well as in
+      # the client. A listing at the `native` tier is refused outright.
+      - name: validate every entry
+        run: node packages/cli/dist/cli.js registry registry/index.json

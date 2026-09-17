@@ -26,6 +26,14 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --exclude aneural-gui --all-targets -- -D warnings
       - run: cargo test --workspace --exclude aneural-gui
+      # The marketplace's TLS must stay on `ring`. `aws-lc-rs` needs cmake and
+      # NASM, which would break the napi cross-build for windows-msvc.
+      - name: rustls uses ring, not aws-lc-rs
+        run: |
+          if cargo tree -p aneural-registry -e normal | grep -q aws-lc; then
+            echo "aneural-registry pulled in aws-lc-rs; pin ureq/rustls back to ring" >&2
+            exit 1
+          fi
       - run: cargo check -p aneural-gui
 
   node:

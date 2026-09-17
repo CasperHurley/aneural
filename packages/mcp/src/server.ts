@@ -251,7 +251,8 @@ export function createAneuralServer(opts: AneuralServerOptions): AneuralServer {
     {
       title: 'Spores',
       description:
-        'Installed spores (lightweight harvesters that add node kinds) and whether they are enabled.',
+        'Installed spores (lightweight harvesters that add node kinds), whether they are enabled, ' +
+        'and what each one is permitted to do.',
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     },
@@ -259,7 +260,16 @@ export function createAneuralServer(opts: AneuralServerOptions): AneuralServer {
       const spores = api.listSpores(root);
       return text(
         spores
-          .map((s) => `- ${s.name}@${s.version} ${s.enabled ? '[on]' : '[off]'} — ${s.description}`)
+          .map((s) => {
+            // Tier and unanswered settings, so an agent reading the graph can
+            // tell "there are no pull requests" from "it was never configured".
+            const notes = [
+              s.enabled ? '[on]' : '[off]',
+              s.tier === 'declarative' ? '' : `[${s.tier}]`,
+              s.missingSettings?.length ? `[needs ${s.missingSettings.join(', ')}]` : '',
+            ].filter(Boolean);
+            return `- ${s.name}@${s.version} ${notes.join(' ')} — ${s.description}`;
+          })
           .join('\n'),
         { spores },
       );

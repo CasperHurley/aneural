@@ -9,6 +9,7 @@ pub mod focus;
 pub mod graph;
 pub mod id;
 pub mod kinds;
+pub mod net;
 pub mod spore;
 pub mod workspace;
 

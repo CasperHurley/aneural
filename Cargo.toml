@@ -17,6 +17,7 @@ aneural-store = { path = "crates/aneural-store" }
 aneural-lang = { path = "crates/aneural-lang" }
 aneural-engine = { path = "crates/aneural-engine" }
 aneural-icons = { path = "crates/aneural-icons" }
+aneural-registry = { path = "crates/aneural-registry" }
 
 # general
 serde = { version = "1", features = ["derive"] }
@@ -32,7 +33,7 @@ toml = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
-time = { version = "0.3", features = ["formatting", "parsing"] }
+time = { version = "0.3", features = ["formatting", "parsing", "local-offset"] }
 
 # storage / fs
 rusqlite = { version = "0.40.2", features = ["bundled"] }
@@ -40,6 +41,10 @@ notify = "8.2"
 notify-debouncer-full = "0.7"
 ignore = "0.4.33"
 globset = "0.4.20"
+
+# marketplace networking (the only crates that reach the network)
+ureq = { version = "3.4.2", features = ["json"] }
+sha2 = "0.11.0"
 petgraph = "0.8"
 
 # language analysis (exact pins: tree-sitter ABI compatibility)

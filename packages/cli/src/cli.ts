@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import * as core from '@aneural/core';
 import { Command } from 'commander';
 import { c, fail, json, table } from './output.js';
-import { fetchRegistry, fetchSpore } from './registry.js';
+import * as scaffold from './scaffold.js';
 
 const VERSION = '0.1.0';
 
@@ -33,29 +32,6 @@ function resolveRoot(cmd: Command, required = true): string {
   if (required)
     fail('no .aneural workspace found above the current directory (run `aneural init`)');
   return process.cwd();
-}
-
-function configPath(root: string): string {
-  return path.join(root, '.aneural', 'config.json');
-}
-
-function readConfig(root: string): Record<string, unknown> {
-  return JSON.parse(fs.readFileSync(configPath(root), 'utf8')) as Record<string, unknown>;
-}
-
-function writeConfig(root: string, config: Record<string, unknown>): void {
-  fs.writeFileSync(configPath(root), `${JSON.stringify(config, null, 2)}\n`);
-}
-
-function enabledSpores(config: Record<string, unknown>): string[] {
-  const spores = (config.spores ?? {}) as { enabled?: string[] };
-  return spores.enabled ?? [];
-}
-
-function setEnabledSpores(config: Record<string, unknown>, enabled: string[]): void {
-  const spores = (config.spores ?? {}) as Record<string, unknown>;
-  spores.enabled = enabled;
-  config.spores = spores;
 }
 
 const MCP_SERVER_ENTRY = { command: 'npx', args: ['-y', 'aneural', 'mcp'] };
@@ -300,7 +276,27 @@ focus.command('clear').action((_opts: unknown, cmd: Command) => {
 
 // ---- spores ----------------------------------------------------------------
 
-const spores = program.command('spores').description('list, install and validate spores');
+const spores = program
+  .command('spores')
+  .description('browse, install and validate spores from the marketplace');
+
+/// Mirrors `EnvSecrets::var_name` in `aneural-core`, so the CLI can print the
+/// exact variable the engine will look for.
+function envName(secret: string): string {
+  let out = '';
+  let prevLower = false;
+  for (const ch of secret) {
+    if (ch >= 'A' && ch <= 'Z' && prevLower) out += '_';
+    out += /[a-zA-Z0-9]/.test(ch) ? ch.toUpperCase() : '_';
+    prevLower = /[a-z0-9]/.test(ch);
+  }
+  return out;
+}
+
+function tierBadge(tier: string): string {
+  // Anything above `declarative` runs with capabilities the user must grant.
+  return tier === 'declarative' ? c.dim(tier) : c.yellow(tier);
+}
 
 spores
   .command('list', { isDefault: true })
@@ -316,15 +312,242 @@ spores
       `${table(
         list.map((s) => [
           s.enabled ? c.green('on') : c.dim('off'),
-          s.name,
+          s.id,
           s.version,
-          s.location,
+          s.tier === 'declarative' ? c.dim('—') : tierBadge(s.tier),
           s.nodeKinds.join(','),
-          s.description,
+          s.missingSettings?.length
+            ? c.yellow(`needs ${s.missingSettings.join(', ')}`)
+            : s.description,
         ]),
-        ['', 'name', 'version', 'from', 'kinds', 'description'],
+        ['', 'id', 'version', 'tier', 'kinds', 'description'],
       )}\n`,
     );
+  });
+
+spores
+  .command('search [query...]')
+  .description('search the configured registries')
+  .option('--json', 'machine-readable output')
+  .action((query: string[], opts: { json?: boolean }, cmd: Command) => {
+    const root = resolveRoot(cmd);
+    for (const s of core.registryRefresh(root, false)) {
+      if (!s.ok) process.stderr.write(`${c.red('registry')} ${s.name}: ${s.error}\n`);
+    }
+    const hits = core.searchSpores(root, (query ?? []).join(' '));
+    if (opts.json) {
+      process.stdout.write(`${json(hits)}\n`);
+      return;
+    }
+    if (hits.length === 0) {
+      process.stdout.write(`${c.dim('nothing found')}\n`);
+      return;
+    }
+    process.stdout.write(
+      `${table(
+        hits.map((h) => [
+          h.id,
+          h.version,
+          tierBadge(h.tier),
+          h.registry,
+          h.firstParty ? c.green('first-party') : c.dim('third-party'),
+          h.description,
+        ]),
+        ['id', 'version', 'tier', 'from', '', 'description'],
+      )}\n`,
+    );
+  });
+
+spores
+  .command('info <id>')
+  .description('what a spore would add, and what it would be allowed to do')
+  .option('--json', 'machine-readable output')
+  .action((id: string, opts: { json?: boolean }, cmd: Command) => {
+    const root = resolveRoot(cmd);
+    let plan: core.InstallPlan;
+    try {
+      plan = core.planInstallSpore(root, id);
+    } catch (e) {
+      fail((e as Error).message);
+    }
+    if (opts.json) {
+      process.stdout.write(`${json(plan)}\n`);
+      return;
+    }
+    process.stdout.write(renderPlan(plan));
+  });
+
+/// The same summary the GUI consent sheet shows. Keeping one renderer is what
+/// keeps the CLI and the GUI honest about what the user agreed to.
+function renderPlan(plan: core.InstallPlan): string {
+  const lines: string[] = [];
+  lines.push(`${c.bold(plan.displayName || plan.id)} ${c.dim(`${plan.id} · v${plan.version}`)}`);
+  if (plan.description) lines.push(plan.description);
+  lines.push('');
+  lines.push(
+    `${c.dim('from')}     ${plan.registry} · ${plan.repo}${
+      plan.firstParty ? ` ${c.green('first-party')}` : ''
+    }`,
+  );
+  lines.push(`${c.dim('tier')}     ${tierBadge(plan.tier)}`);
+  if (plan.nodeKinds.length) lines.push(`${c.dim('adds')}     ${plan.nodeKinds.join(', ')}`);
+  if (plan.previousVersion) {
+    lines.push(`${c.dim('update')}   ${plan.previousVersion} → ${plan.version}`);
+  }
+  lines.push('');
+  lines.push(c.bold('It will be allowed to:'));
+  if (plan.consentLines.length === 0) {
+    lines.push(`  ${c.dim('Nothing. It only reads files you already index.')}`);
+  }
+  for (const line of plan.consentLines) lines.push(`  · ${line}`);
+  if (plan.settings?.length) {
+    lines.push('');
+    lines.push(c.bold('You will need to set:'));
+    for (const setting of plan.settings) {
+      const have = setting.value ? c.green(setting.value) : c.yellow('not set');
+      const hint = setting.example ? c.dim(` e.g. ${setting.example}`) : '';
+      lines.push(`  · ${setting.key}  ${have}${hint}`);
+      if (setting.description) lines.push(`      ${c.dim(setting.description)}`);
+    }
+    lines.push(
+      c.dim(`  aneural spores set ${plan.id} <key> <value>`),
+    );
+  }
+  if (plan.missingSecrets?.length) {
+    lines.push('');
+    lines.push(c.bold('Credentials it needs, which are not set:'));
+    for (const name of plan.missingSecrets) {
+      lines.push(`  · ${name}  ${c.dim(`export ANEURAL_SECRET_${envName(name)}=…`)}`);
+    }
+  }
+  if (!plan.firstParty) {
+    lines.push('');
+    lines.push(c.yellow(core.marketplaceDisclaimer()));
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+/// Ask before installing third-party code. A non-interactive run must never
+/// consent on the user's behalf, so it exits rather than guessing.
+async function confirmInstall(plan: core.InstallPlan, yes: boolean): Promise<void> {
+  process.stdout.write(renderPlan(plan));
+  if (yes) return;
+  if (!process.stdin.isTTY) {
+    process.stderr.write(
+      `${c.red('error')} refusing to install without consent; re-run with --yes\n`,
+    );
+    process.exit(2);
+  }
+  const readline = await import('node:readline/promises');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const answer = (await rl.question('\nInstall? [y/N] ')).trim().toLowerCase();
+  rl.close();
+  if (answer !== 'y' && answer !== 'yes') {
+    process.stdout.write(`${c.dim('cancelled')}\n`);
+    process.exit(1);
+  }
+}
+
+spores
+  .command('add <id>')
+  .description('install a spore from the marketplace')
+  .option('-y, --yes', 'skip the consent prompt')
+  .option('--no-enable', 'install without enabling')
+  .action(async (id: string, opts: { yes?: boolean; enable?: boolean }, cmd: Command) => {
+    const root = resolveRoot(cmd);
+    try {
+      const plan = core.planInstallSpore(root, id);
+      if (plan.requiresConsent) await confirmInstall(plan, opts.yes ?? false);
+      const out = core.installSpore(root, id, opts.enable !== false);
+      process.stdout.write(`${c.green('installed')} ${out.id}@${out.version} → ${out.dir}\n`);
+    } catch (e) {
+      fail((e as Error).message);
+    }
+  });
+
+spores
+  .command('remove <id>')
+  .description('uninstall a spore (or disable a builtin)')
+  .action((id: string, _opts: unknown, cmd: Command) => {
+    const root = resolveRoot(cmd);
+    try {
+      core.uninstallSpore(root, id);
+    } catch (e) {
+      fail((e as Error).message);
+    }
+    process.stdout.write(`${c.green('removed')} ${id}\n`);
+  });
+
+for (const [verb, on] of [
+  ['enable', true],
+  ['disable', false],
+] as const) {
+  spores
+    .command(`${verb} <id>`)
+    .description(`${verb} an installed spore`)
+    .action((id: string, _opts: unknown, cmd: Command) => {
+      const root = resolveRoot(cmd);
+      try {
+        core.setSporeEnabled(root, id, on);
+      } catch (e) {
+        fail((e as Error).message);
+      }
+      process.stdout.write(`${c.green(on ? 'enabled' : 'disabled')} ${id}\n`);
+    });
+}
+
+spores
+  .command('set <id> <key> [value]')
+  .description('record a value a spore declared it needs (omit value to clear it)')
+  .action((id: string, key: string, value: string | undefined, _o: unknown, cmd: Command) => {
+    const root = resolveRoot(cmd);
+    const known = core.listSpores(root).find((s) => s.id === id || s.name === id);
+    if (!known) {
+      process.stderr.write(`${c.red('error')} no installed spore \`${id}\`\n`);
+      process.exit(1);
+    }
+    core.setSporeSetting(root, known.id, key, value ?? null);
+    process.stdout.write(
+      value === undefined
+        ? `${c.dim('cleared')} ${known.id} ${key}\n`
+        : `${c.green('set')} ${known.id} ${key} = ${value}\n`,
+    );
+    const still = core.listSpores(root).find((s) => s.id === known.id);
+    if (still?.missingSettings?.length) {
+      process.stdout.write(
+        `${c.yellow('still needed')} ${still.missingSettings.join(', ')}\n`,
+      );
+    }
+  });
+
+spores
+  .command('refresh [id]')
+  .description('re-fetch spores that read a web API')
+  .option('--json', 'machine-readable output')
+  .action((id: string | undefined, opts: { json?: boolean }, cmd: Command) => {
+    const root = resolveRoot(cmd);
+    const result = core.refreshSpores(root, id ?? null, true);
+    if (opts.json) {
+      process.stdout.write(`${json(result)}\n`);
+      process.exit(result.problems.length ? 1 : 0);
+    }
+    for (const problem of result.problems) {
+      process.stderr.write(`${c.yellow('warn')} ${problem}\n`);
+    }
+    if (result.harvesters === 0) {
+      // Nothing ran: either there is nothing to run, or every harvester was
+      // blocked — and the warnings above already said which.
+      if (result.problems.length === 0) {
+        process.stdout.write(`${c.dim('no spores read a web API')}\n`);
+        return;
+      }
+      process.exit(1);
+    }
+    process.stdout.write(
+      `${c.green('refreshed')} ${result.harvesters} harvester(s) · ` +
+        `${result.nodes} nodes · ${result.edges} edges\n`,
+    );
+    if (result.problems.length) process.exit(1);
   });
 
 spores
@@ -340,65 +563,33 @@ spores
     process.exit(1);
   });
 
-async function installSpore(root: string, name: string, registryUrl: string): Promise<void> {
-  const reg = await fetchRegistry(registryUrl);
-  const entry = reg.spores.find((s) => s.name === name);
-  if (!entry) fail(`spore "${name}" is not in the registry (${registryUrl})`);
-  const fetched = await fetchSpore(entry);
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aneural-spore-'));
-  const tmpFile = path.join(tmp, 'spore.json');
-  fs.writeFileSync(tmpFile, fetched.text);
-  const problems = core.validateSpore(tmpFile);
-  fs.rmSync(tmp, { recursive: true, force: true });
-  if (problems.length) fail(`spore "${name}" is invalid:\n  ${problems.join('\n  ')}`);
-  const dir = path.join(root, '.aneural', 'spores', name);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'spore.json'), fetched.text);
-  const config = readConfig(root);
-  const enabled = enabledSpores(config);
-  if (!enabled.includes(name)) setEnabledSpores(config, [...enabled, name]);
-  writeConfig(root, config);
-  process.stdout.write(`${c.green('installed')} ${name}@${fetched.manifest.version} → ${dir}\n`);
-}
-
 spores
-  .command('add <name>')
-  .description('install a spore from the marketplace registry')
-  .action(async (name: string, _opts: unknown, cmd: Command) => {
+  .command('verify')
+  .description('check installed spores against the lockfile')
+  .option('--json', 'machine-readable output')
+  .action((opts: { json?: boolean }, cmd: Command) => {
     const root = resolveRoot(cmd);
-    const config = readConfig(root);
-    const registry = ((config.spores ?? {}) as { registry?: string }).registry;
-    if (!registry) fail('config.spores.registry is not set');
-    try {
-      await installSpore(root, name, registry);
-    } catch (e) {
-      fail((e as Error).message);
+    const drift = core.verifySpores(root);
+    if (opts.json) {
+      process.stdout.write(`${json(drift)}\n`);
+      return;
+    }
+    if (drift.length === 0) {
+      process.stdout.write(`${c.green('ok')} every installed spore matches the lockfile\n`);
+      return;
+    }
+    for (const d of drift) {
+      const where = d.file ? ` (${d.file})` : '';
+      process.stdout.write(`${c.yellow(d.kind)} ${d.id}${where}\n`);
     }
   });
 
 spores
-  .command('remove <name>')
-  .description('uninstall a workspace spore (or disable a builtin)')
-  .action((name: string, _opts: unknown, cmd: Command) => {
-    const root = resolveRoot(cmd);
-    fs.rmSync(path.join(root, '.aneural', 'spores', name), { recursive: true, force: true });
-    const config = readConfig(root);
-    setEnabledSpores(
-      config,
-      enabledSpores(config).filter((s) => s !== name),
-    );
-    writeConfig(root, config);
-    process.stdout.write(`${c.green('removed')} ${name}\n`);
-  });
-
-spores
   .command('update')
-  .description('re-fetch installed workspace spores')
-  .action(async (_opts: unknown, cmd: Command) => {
+  .description('re-install installed spores at the versions the registries now list')
+  .option('-y, --yes', 'skip consent prompts')
+  .action(async (opts: { yes?: boolean }, cmd: Command) => {
     const root = resolveRoot(cmd);
-    const config = readConfig(root);
-    const registry = ((config.spores ?? {}) as { registry?: string }).registry;
-    if (!registry) fail('config.spores.registry is not set');
     const installed = core.listSpores(root).filter((s) => s.location === 'workspace');
     if (installed.length === 0) {
       process.stdout.write(`${c.dim('no workspace spores installed')}\n`);
@@ -406,11 +597,211 @@ spores
     }
     for (const s of installed) {
       try {
-        await installSpore(root, s.name, registry);
+        const plan = core.planInstallSpore(root, s.id);
+        if (plan.previousVersion === plan.version) {
+          process.stdout.write(`${c.dim('current')} ${s.id}@${s.version}\n`);
+          continue;
+        }
+        // Only a spore asking for more than it already had re-prompts.
+        if (plan.requiresConsent) await confirmInstall(plan, opts.yes ?? false);
+        const out = core.installSpore(root, s.id, true);
+        process.stdout.write(
+          `${c.green('updated')} ${out.id} ${out.previousVersion ?? '?'} → ${out.version}\n`,
+        );
       } catch (e) {
-        process.stderr.write(`${c.red('failed')} ${s.name}: ${(e as Error).message}\n`);
+        process.stderr.write(`${c.red('failed')} ${s.id}: ${(e as Error).message}\n`);
       }
     }
+  });
+
+spores
+  .command('init [dir]')
+  .description('scaffold a publishable spore repo')
+  .requiredOption('-p, --publisher <name>', 'your marketplace publisher id (kebab-case)')
+  .option('-n, --name <name>', 'spore name (kebab-case); defaults to the directory name')
+  .option('--force', 'overwrite existing files')
+  .action(
+    (dir: string | undefined, opts: { publisher: string; name?: string; force?: boolean }) => {
+      const target = path.resolve(dir ?? '.');
+      const name = opts.name ?? path.basename(target);
+      const kebab = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+      if (!kebab.test(opts.publisher)) fail(`publisher \`${opts.publisher}\` must be kebab-case`);
+      if (!kebab.test(name)) fail(`name \`${name}\` must be kebab-case`);
+
+      const spec = { publisher: opts.publisher, name };
+      const files: Record<string, string> = {
+        'spore.json': scaffold.manifest(spec),
+        'README.md': scaffold.readme(spec),
+        'AGENTS.md': scaffold.agents(spec),
+        'fixtures/sample.md': scaffold.fixture(),
+        '.github/workflows/validate.yml': scaffold.workflow(),
+      };
+
+      for (const [rel, body] of Object.entries(files)) {
+        const out = path.join(target, rel);
+        if (fs.existsSync(out) && !opts.force) fail(`${rel} already exists (use --force)`);
+        fs.mkdirSync(path.dirname(out), { recursive: true });
+        fs.writeFileSync(out, body);
+      }
+
+      // Seed the snapshot so the first `spores test` is a real comparison.
+      writeSnapshot(
+        target,
+        core.testSpore(path.join(target, 'spore.json'), path.join(target, 'fixtures')),
+      );
+
+      process.stdout.write(`${c.green('created')} ${opts.publisher}.${name} in ${target}\n`);
+      for (const rel of Object.keys(files)) process.stdout.write(`  ${c.dim(rel)}\n`);
+      process.stdout.write(`  ${c.dim('fixtures/expected.json')}\n`);
+      process.stdout.write(`\nnext: ${c.bold('aneural spores test ' + (dir ?? '.'))}\n`);
+    },
+  );
+
+interface Snapshot {
+  nodes: unknown[];
+  edges: unknown[];
+}
+
+function snapshotPath(dir: string): string {
+  return path.join(dir, 'fixtures', 'expected.json');
+}
+
+function writeSnapshot(dir: string, result: Snapshot): void {
+  fs.writeFileSync(snapshotPath(dir), `${JSON.stringify(result, null, 2)}\n`);
+}
+
+spores
+  .command('test [dir]')
+  .description('run a spore over its fixtures and diff the snapshot')
+  .option('-u, --update', 'accept the current output as the snapshot')
+  .action((dir: string | undefined, opts: { update?: boolean }) => {
+    const target = path.resolve(dir ?? '.');
+    const manifestFile = path.join(target, 'spore.json');
+    if (!fs.existsSync(manifestFile)) fail(`no spore.json in ${target}`);
+
+    const problems = core.validateSpore(manifestFile);
+    if (problems.length) {
+      for (const p of problems) process.stdout.write(`${c.red('✗')} ${p}\n`);
+      process.exit(1);
+    }
+
+    const fixtures = path.join(target, 'fixtures');
+    if (!fs.existsSync(fixtures)) fail(`no fixtures/ in ${target}`);
+    const actual = core.testSpore(manifestFile, fixtures) as Snapshot;
+
+    if (opts.update) {
+      writeSnapshot(target, actual);
+      process.stdout.write(
+        `${c.green('updated')} ${actual.nodes.length} node(s), ${actual.edges.length} edge(s)\n`,
+      );
+      return;
+    }
+
+    const snapshot = snapshotPath(target);
+    if (!fs.existsSync(snapshot)) {
+      fail(`no fixtures/expected.json; run with --update to create it`);
+    }
+    const expected = JSON.parse(fs.readFileSync(snapshot, 'utf8')) as Snapshot;
+
+    const a = JSON.stringify(actual, null, 2);
+    const b = JSON.stringify(expected, null, 2);
+    if (a === b) {
+      process.stdout.write(
+        `${c.green('ok')} ${actual.nodes.length} node(s), ${actual.edges.length} edge(s) match the snapshot\n`,
+      );
+      return;
+    }
+
+    process.stdout.write(`${c.red('changed')} output differs from fixtures/expected.json\n\n`);
+    for (const line of diff(b, a)) process.stdout.write(`${line}\n`);
+    process.stdout.write(`\n${c.dim('re-run with --update once this is what you meant')}\n`);
+    process.exit(1);
+  });
+
+/** Line diff, just enough to read a snapshot change without a dependency. */
+function diff(before: string, after: string): string[] {
+  const b = before.split('\n');
+  const a = after.split('\n');
+  const out: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < b.length || j < a.length) {
+    if (i < b.length && j < a.length && b[i] === a[j]) {
+      i++;
+      j++;
+      continue;
+    }
+    // Resynchronise on the next line that matches, so one insertion does not
+    // render the whole rest of the file as changed.
+    const resync = a.indexOf(b[i] ?? '\u0000', j);
+    if (i < b.length && resync === -1) {
+      out.push(c.red(`- ${b[i]}`));
+      i++;
+    } else {
+      while (j < resync) {
+        out.push(c.green(`+ ${a[j]}`));
+        j++;
+      }
+      if (i < b.length) {
+        i++;
+        j++;
+      } else {
+        out.push(c.green(`+ ${a[j]}`));
+        j++;
+      }
+    }
+    if (out.length > 60) {
+      out.push(c.dim('  …'));
+      break;
+    }
+  }
+  return out;
+}
+
+spores
+  .command('migrate')
+  .description('bring a pre-marketplace .aneural/config.json up to date')
+  .option('--write', 'apply the changes (default: show them)')
+  .action((opts: { write?: boolean }, cmd: Command) => {
+    const root = resolveRoot(cmd);
+    const changes = core.migrateSporesConfig(root, opts.write ?? false);
+    if (changes.length === 0) {
+      process.stdout.write(`${c.green('ok')} config is already up to date\n`);
+      return;
+    }
+    for (const change of changes) process.stdout.write(`  ${change}\n`);
+    process.stdout.write(
+      opts.write
+        ? `${c.green('migrated')} ${changes.length} change(s)\n`
+        : `${c.dim(`${changes.length} change(s); re-run with --write to apply`)}\n`,
+    );
+  });
+
+// ---- registry --------------------------------------------------------------
+
+program
+  .command('registry')
+  .argument('<index>', 'path to a registry index.json')
+  .description('validate a registry index (what registry CI runs on a submission)')
+  .option('--json', 'machine-readable output')
+  .action((index: string, opts: { json?: boolean }) => {
+    let problems: string[];
+    try {
+      problems = core.validateRegistryIndex(path.resolve(index));
+    } catch (e) {
+      fail((e as Error).message);
+    }
+    if (opts.json) {
+      process.stdout.write(`${json(problems)}\n`);
+      if (problems.length) process.exit(1);
+      return;
+    }
+    if (problems.length === 0) {
+      process.stdout.write(`${c.green('valid')} ${index}\n`);
+      return;
+    }
+    for (const p of problems) process.stdout.write(`${c.red('✗')} ${p}\n`);
+    process.exit(1);
   });
 
 // ---- mcp -------------------------------------------------------------------
