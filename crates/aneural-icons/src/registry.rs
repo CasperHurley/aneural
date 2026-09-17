@@ -1,6 +1,8 @@
 //! The curated icon table. Every entry references a real static from an
-//! `icondata_*` set crate, so a misspelled name fails to compile.
+//! `icondata_*` set crate (or [`crate::drawn`]), so a misspelled name fails to
+//! compile.
 
+use crate::drawn;
 use icondata_core::Icon;
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -30,6 +32,10 @@ icon_table! {
         BsFiletypeMp4, BsFiletypeMov,
         BsFiletypeDoc, BsFiletypeDocx, BsFiletypeXls, BsFiletypeXlsx,
         BsFiletypePpt, BsFiletypePptx,
+    ],
+    drawn::[
+        // the file types Bootstrap has no page for, built from its letters
+        AnFiletypeTs, AnFiletypeRs, AnFiletypeGo, AnFiletypeToml,
     ],
     icondata_lu::[
         // structure

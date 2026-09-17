@@ -22,9 +22,10 @@ pub fn default_icon(kind: &str, path: Option<&Path>) -> &'static str {
 
 /// Icon for a file by extension or well-known name.
 ///
-/// Prefers Bootstrap's `BsFiletype*` set, which draws the extension on the
-/// page itself, and falls back to a brand mark for languages Bootstrap has no
-/// filetype glyph for (Rust, Go, TOML, ...).
+/// Every source file is a Bootstrap-style page with its extension drawn on it:
+/// `BsFiletype*` where Bootstrap has one, and the `AnFiletype*` icons built
+/// from Bootstrap's letters where it does not (TS, RS, GO, TOML). Only a
+/// Dockerfile, which has no extension to draw, gets a brand mark.
 pub fn file_icon(path: &Path) -> &'static str {
     let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
     if name.eq_ignore_ascii_case("dockerfile")
@@ -39,12 +40,12 @@ pub fn file_icon(path: &Path) -> &'static str {
     match ext.as_deref() {
         // code
         Some("tsx") => "BsFiletypeTsx",
-        Some("ts" | "mts" | "cts") => "SiTypescript",
+        Some("ts" | "mts" | "cts") => "AnFiletypeTs",
         Some("jsx") => "BsFiletypeJsx",
         Some("js" | "mjs" | "cjs") => "BsFiletypeJs",
         Some("py" | "pyi") => "BsFiletypePy",
-        Some("rs") => "SiRust",
-        Some("go") => "SiGo",
+        Some("rs") => "AnFiletypeRs",
+        Some("go") => "AnFiletypeGo",
         Some("java") => "BsFiletypeJava",
         Some("cs") => "BsFiletypeCs",
         Some("php") => "BsFiletypePhp",
@@ -57,7 +58,7 @@ pub fn file_icon(path: &Path) -> &'static str {
         Some("md" | "markdown") => "BsFiletypeMd",
         Some("json" | "jsonc") => "BsFiletypeJson",
         Some("yaml" | "yml") => "BsFiletypeYml",
-        Some("toml") => "SiToml",
+        Some("toml") => "AnFiletypeToml",
         Some("xml") => "BsFiletypeXml",
         Some("csv" | "tsv") => "BsFiletypeCsv",
         Some("html" | "htm") => "BsFiletypeHtml",
@@ -130,7 +131,7 @@ mod tests {
         );
         assert_eq!(
             default_icon("File", Some(Path::new("src/main.RS"))),
-            "SiRust"
+            "AnFiletypeRs"
         );
         assert_eq!(
             default_icon("File", Some(Path::new("Dockerfile"))),

@@ -6,6 +6,7 @@
 //! feature rasterizes an icon to RGBA via `resvg` for use as a sprite.
 
 mod defaults;
+mod drawn;
 mod registry;
 mod svg;
 
