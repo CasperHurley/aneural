@@ -2,7 +2,70 @@
   "$schema": "https://aneural.dev/schema/config-v1.json",
   "version": 1,
   "name": "sample-workspace",
-  "roots": ["."],
+  "roots": [
+    "."
+  ],
   "respectGitignore": true,
-  "nodeTypes": { "Idea": { "color": "#f5c542" } }
+  "ignore": [
+    "**/node_modules/**",
+    "**/target/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.git/**",
+    "**/.turbo/**",
+    "**/__pycache__/**",
+    "**/.venv/**",
+    "**/vendor/**"
+  ],
+  "languages": [
+    "typescript",
+    "javascript",
+    "python",
+    "rust",
+    "go",
+    "java",
+    "php",
+    "ruby"
+  ],
+  "typescript": {
+    "tsconfig": "auto",
+    "conditionNames": [
+      "import",
+      "require",
+      "node",
+      "types",
+      "default"
+    ]
+  },
+  "spores": {
+    "enabled": [
+      "aneural.comments",
+      "aneural.plans",
+      "aneural.icebox",
+      "aneural.wiki-links"
+    ],
+    "registries": [
+      {
+        "name": "official",
+        "url": "https://raw.githubusercontent.com/Parnassix/aneural/main/registry/index.json"
+      }
+    ],
+    "allowDirectUrlInstall": true,
+    "settings": {
+      "aneural.github": {
+        "repo": "parnassix/aneural"
+      }
+    }
+  },
+  "nodeTypes": {
+    "Idea": {
+      "color": "#f5c542"
+    }
+  },
+  "gui": {
+    "theme": "mycelium-dark",
+    "labelZoomThreshold": 0.8,
+    "growthBudgetPerFrame": 200,
+    "circadian": "auto"
+  }
 }
