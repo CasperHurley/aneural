@@ -51,37 +51,33 @@ impl NodeKind {
 pub struct EdgeKind;
 
 impl EdgeKind {
-    /// Directory → Directory/File, Repo → root Directory.
+    /// Directory → Directory/File, Repo → root Directory. The folder tree
+    /// every other kind hangs off, so it is always drawn.
     pub const CONTAINS: &'static str = "CONTAINS";
-    /// File/Directory/Manifest → Repo.
-    pub const BELONGS_TO: &'static str = "BELONGS_TO";
-    /// File → File (resolved import).
+    /// File → File/Directory/Package: anything a file pulls in by `import`,
+    /// `use` or `export … from`. The edge's `importKind` prop keeps the syntax.
     pub const IMPORTS: &'static str = "IMPORTS";
-    /// File → File (`export ... from`).
-    pub const RE_EXPORTS: &'static str = "RE_EXPORTS";
-    /// File → File, weak reference (require(), `mod`, asset url).
+    /// File → File, looser than an import (require(), `mod`, include), and
+    /// between spore nodes such as tables linked by a foreign key.
     pub const REFERENCES: &'static str = "REFERENCES";
-    /// Manifest/File → Package (external dependency or unresolved import).
-    pub const DEPENDS_ON: &'static str = "DEPENDS_ON";
-    /// Comment/Plan → File/Directory.
+    /// Comment/Plan → File/Directory: a note pointed at code.
     pub const ANNOTATES: &'static str = "ANNOTATES";
-    /// Note/Idea/Plan → anything (wiki-link, frontmatter).
+    /// Note/Idea/Plan → anything (wiki-link, source file). Not drawn as a
+    /// strand: the node floats near what it relates to instead.
     pub const RELATES_TO: &'static str = "RELATES_TO";
 
     pub const ALL: &'static [&'static str] = &[
         Self::CONTAINS,
-        Self::BELONGS_TO,
         Self::IMPORTS,
-        Self::RE_EXPORTS,
         Self::REFERENCES,
-        Self::DEPENDS_ON,
         Self::ANNOTATES,
         Self::RELATES_TO,
     ];
 
-    /// Structural edges describe the tree; the rest are "semantic".
-    pub fn is_structural(kind: &str) -> bool {
-        matches!(kind, Self::CONTAINS | Self::BELONGS_TO)
+    /// Kinds the user can switch off. The folder tree is the skeleton and
+    /// relations are shown by where a node floats, so neither is a line to hide.
+    pub fn is_toggleable(kind: &str) -> bool {
+        !matches!(kind, Self::CONTAINS | Self::RELATES_TO)
     }
 
     /// Human-readable name for a kind, e.g. `RE_EXPORTS` → "Re-exports".
@@ -89,11 +85,8 @@ impl EdgeKind {
     pub fn label(kind: &str) -> Cow<'static, str> {
         match kind {
             Self::CONTAINS => "Contains".into(),
-            Self::BELONGS_TO => "Belongs to".into(),
             Self::IMPORTS => "Imports".into(),
-            Self::RE_EXPORTS => "Re-exports".into(),
             Self::REFERENCES => "References".into(),
-            Self::DEPENDS_ON => "Depends on".into(),
             Self::ANNOTATES => "Annotates".into(),
             Self::RELATES_TO => "Relates to".into(),
             other => Cow::Owned(humanize(other)),
@@ -118,7 +111,6 @@ pub struct Source;
 
 impl Source {
     pub const WALKER: &'static str = "walker";
-    pub const MANIFEST: &'static str = "manifest";
     pub const LANG: &'static str = "lang";
     pub fn spore(name: &str) -> String {
         format!("spore:{name}")
@@ -131,8 +123,7 @@ mod tests {
 
     #[test]
     fn edge_labels_are_human_readable() {
-        assert_eq!(EdgeKind::label(EdgeKind::RE_EXPORTS), "Re-exports");
-        assert_eq!(EdgeKind::label(EdgeKind::DEPENDS_ON), "Depends on");
+        assert_eq!(EdgeKind::label(EdgeKind::RELATES_TO), "Relates to");
         assert_eq!(
             EdgeKind::label("TASTES_LIKE_MUSHROOM"),
             "Tastes like mushroom"

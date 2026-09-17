@@ -4,7 +4,7 @@
             ┌──────────────┐   GraphDelta stream   ┌──────────────┐
   files ──▶ │ aneural-engine│ ────────────────────▶ │ aneural-gui  │──▶ .aneural/state/focus.json
             │ walk/watch    │                       │ (Bevy)       │             │
-            │ manifests     │──▶ aneural-store      └──────────────┘             ▼
+            │               │──▶ aneural-store      └──────────────┘             ▼
             │ lang (tree-   │    (SQLite cache)  ◀── @aneural/core ◀── aneural CLI / @aneural/mcp ──▶ Claude Code, Codex
             │  sitter+oxc)  │                        (napi-rs)
             │ spores        │
@@ -24,15 +24,15 @@ just costs a full reindex.
 content, so GUI layout and focus selections survive edits. Files that are manifests keep the `file:`
 id but get kind `Manifest`; a directory containing `.git` keeps its `dir:` id but gets kind `Repo`, and
 every node under it carries `repoId`. (The plan sketched separate `manifest:`/`repo:` nodes and
-`BELONGS_TO` edges; folding them into the file/dir nodes halves the node count and avoids hub hairballs.
-`BELONGS_TO` remains a reserved edge kind.)
+`BELONGS_TO` edges; folding them into the file/dir nodes halves the node count and avoids hub hairballs.)
+Manifests are not parsed for dependencies: a `Package` node exists because some file imports it.
 
 **Deltas, not snapshots.** The engine streams `GraphDelta { removedNodeIds, removedEdges, nodes, edges,
 phase, initialComplete }`. A full index re-emits everything it knows (including unchanged files, from
 the cache) so a fresh consumer builds the whole graph, then prunes what vanished. Live changes come
 from a debounced `notify` watcher and go through the same per-file pipeline.
 
-**Per-file pipeline** (`Engine::process_file`): fingerprint check → manifest parse → language analysis
+**Per-file pipeline** (`Engine::process_file`): fingerprint check → language analysis
 (`extract_imports` + `Resolver`) → spore harvesters → `Store::replace_origin` → delta.
 
 **Focus handoff.** The GUI derives a `Focus` (filters, selection, neighbourhood depth, visible ids,

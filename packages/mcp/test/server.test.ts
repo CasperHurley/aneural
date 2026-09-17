@@ -97,7 +97,7 @@ describe('aneural MCP server', () => {
       name: 'aneural_get_node',
       arguments: { id: 'file:apps/web/src/app.ts' },
     });
-    expect(textOf(n)).toContain('RE_EXPORTS');
+    expect(textOf(n)).toContain('IMPORTS');
     const f = await client.callTool({
       name: 'aneural_read_file',
       arguments: { path: 'apps/web/src/types.ts', startLine: 1, endLine: 1 },

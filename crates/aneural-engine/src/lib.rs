@@ -4,7 +4,6 @@
 
 pub mod analysis;
 pub mod doctor;
-pub mod manifest;
 pub mod spores;
 pub mod walk;
 pub mod watch;
@@ -387,7 +386,6 @@ impl Engine {
     /// Everything derived from one file's contents.
     fn process_file(&mut self, entry: &Entry, force: bool) -> Result<Processed> {
         let rel = entry.rel.as_str();
-        let name = rel.rsplit('/').next().unwrap_or(rel);
         let lang = walk::node_for(&self.ws, &self.config, entry, None)
             .prop_str("lang")
             .map(String::from);
@@ -446,12 +444,6 @@ impl Engine {
         let mut edges: Vec<Edge> = Vec::new();
         let mut unresolved = Vec::new();
 
-        if walk::is_manifest_name(name) {
-            let deps = manifest::parse(name, &String::from_utf8_lossy(&bytes));
-            let (n, e) = manifest::graph_for(rel, &deps);
-            nodes.extend(n);
-            edges.extend(e);
-        }
         if let Some(l) = lang.as_deref()
             && l != "markdown"
             && self.config.language_enabled(l)

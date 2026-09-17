@@ -12,7 +12,9 @@ use bevy::prelude::*;
 /// The canvas behind the graph: pure black, so nodes and edges carry the
 /// colour on their own.
 pub const BACKGROUND: &str = "#000000";
-pub const PANEL: &str = "#131a16";
+/// The bar and both siders. Almost the canvas's black, with only enough
+/// green in it to read as a surface rather than a hole.
+pub const PANEL: &str = "#0a0d0b";
 pub const TEXT: &str = "#d9d2c5";
 pub const ACCENT: &str = "#9fd18f";
 pub const DIM: &str = "#4c6b5a";
@@ -28,7 +30,7 @@ pub const FALLBACK_NODE: &str = "#9aa0a6";
 /// After dark the same palette, lit from within: cooler, wetter, and pulled
 /// towards the green-cyan that fungi actually glow in.
 const NIGHT_BACKGROUND: &str = "#02070a";
-const NIGHT_PANEL: &str = "#0a1a1d";
+const NIGHT_PANEL: &str = "#050e10";
 const NIGHT_TEXT: &str = "#cbe7df";
 const NIGHT_ACCENT: &str = "#57efb4";
 const NIGHT_DIM: &str = "#2c6b61";
@@ -39,12 +41,13 @@ const NIGHT_WARNING: &str = "#ff9270";
 
 /// Edge kinds, each with the colour it has by day and the one it glows in by
 /// night. Order is only lookup order; the last row catches unknown kinds.
+/// The folder tree is the mycelium itself, so it gets the pale strand colour
+/// of real hyphae; the links between files keep their own hues but are drawn
+/// thin and faint over it until one of their ends is in focus.
 const EDGES: &[(&str, &str, &str)] = &[
-    ("CONTAINS", "#4c6b5a", "#2f7f6d"),
+    ("CONTAINS", "#cfc6ae", "#a4ecd4"),
     ("IMPORTS", "#9fd18f", "#6df2b5"),
-    ("RE_EXPORTS", "#7fd1c7", "#5ff0e6"),
     ("REFERENCES", "#7e8fa5", "#7fb2f0"),
-    ("DEPENDS_ON", "#6f7d99", "#8f9cf0"),
     ("ANNOTATES", "#e8c170", "#ffd98a"),
     ("RELATES_TO", "#a58cd6", "#c39bff"),
     ("", "#8a948f", "#79c9b4"),

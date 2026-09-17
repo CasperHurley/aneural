@@ -2,6 +2,7 @@
 
 use crate::render::{Visuals, spawn_node_visuals};
 use crate::workspace::WorkspaceRes;
+use aneural_core::kinds::EdgeKind;
 use aneural_core::{Edge, GraphDelta, Node, NodeId};
 use bevy::ecs::entity::EntityHashMap;
 use bevy::prelude::*;
@@ -33,16 +34,13 @@ pub struct Vel(pub Vec2);
 
 /// How far a node has wandered from the position the layout gave it, and the
 /// seed its wander is drawn from. Written by [`crate::circadian`] and added
-/// on top of [`Pos`] wherever a node is drawn; the layout and picking never
-/// see it, so the graph breathes without the simulation noticing.
+/// on top of [`Pos`] wherever a node is drawn or picked; the layout never
+/// sees it, so the graph breathes without the simulation noticing.
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct Drift {
     pub seed: u32,
     pub offset: Vec2,
 }
-
-#[derive(Component, Clone, Copy, Debug)]
-pub struct Mass(pub f32);
 
 #[derive(Component)]
 pub struct Pinned;
@@ -71,22 +69,21 @@ pub struct GraphState {
     pub pending_edges: Vec<Edge>,
     /// Adjacency (undirected) for BFS/focus mode: id → (neighbor id, edge kind).
     pub adjacency: HashMap<NodeId, Vec<(NodeId, String)>>,
-    /// Parent (CONTAINS src) per node, for sprouting and gravity.
+    /// Parent (CONTAINS src) per node, for sprouting and the layout's tree.
     pub parent: HashMap<NodeId, NodeId>,
-    /// How many edges touch each node. A hairball is made of nodes with a
-    /// great many links, so both the forces and the renderer read this to
-    /// give the busy ones room and the quiet ones ink.
+    /// How many edges of each kind touch each node. A hairball is made of
+    /// nodes with a great many links, so the renderer reads this to hold back
+    /// the strands between busy ones.
     pub degree: EntityHashMap<Degrees>,
     pub node_count: usize,
     pub edge_count: usize,
 }
 
-/// A node's link count, kept both in total and per kind. Density is a
+/// A node's link count, per kind. Density is a
 /// property of one relation at a time: a file with three imports and twenty
 /// mentions is crowded in mentions and perfectly clear in imports.
 #[derive(Default, Debug)]
 pub struct Degrees {
-    pub total: u32,
     /// A node has a handful of distinct edge kinds at most, so a short list
     /// beats a map here.
     by_kind: Vec<(String, u32)>,
@@ -94,11 +91,6 @@ pub struct Degrees {
 
 impl Degrees {
     fn bump(&mut self, kind: &str, up: bool) {
-        self.total = if up {
-            self.total + 1
-        } else {
-            self.total.saturating_sub(1)
-        };
         match self.by_kind.iter_mut().find(|(k, _)| k == kind) {
             Some((_, n)) => *n = if up { *n + 1 } else { n.saturating_sub(1) },
             None if up => self.by_kind.push((kind.to_string(), 1)),
@@ -116,14 +108,16 @@ impl Degrees {
 }
 
 impl GraphState {
-    /// Every link touching a node, whatever the kind.
-    pub fn degree_of(&self, e: Entity) -> u32 {
-        self.degree.get(&e).map(|d| d.total).unwrap_or(0)
-    }
-
     /// Links of one kind touching a node.
     pub fn kind_degree(&self, e: Entity, kind: &str) -> u32 {
         self.degree.get(&e).map(|d| d.of_kind(kind)).unwrap_or(0)
+    }
+
+    /// Does this node float? One that only relates to others (a note, an
+    /// idea, a plan) has no place in the folder tree, so rather than being
+    /// strung to what it relates to it hovers nearby, like a spore.
+    pub fn floats(&self, e: Entity, id: &NodeId) -> bool {
+        !self.parent.contains_key(id) && self.kind_degree(e, EdgeKind::RELATES_TO) > 0
     }
 
     pub fn neighbors(&self, id: &NodeId) -> &[(NodeId, String)] {
@@ -255,11 +249,6 @@ fn upsert_node(
         repo_id: node.repo_id.clone(),
         props: node.props.clone(),
     };
-    let mass = match node.kind.as_str() {
-        "Repo" => 4.0,
-        "Directory" => 2.0,
-        _ => 1.0,
-    };
     let entity = commands
         .spawn((
             gn,
@@ -269,7 +258,6 @@ fn upsert_node(
                 seed: seed_of(node.id.as_str()),
                 offset: Vec2::ZERO,
             },
-            Mass(mass),
             GrowIn::default(),
             Transform::from_translation(pos.extend(0.0)).with_scale(Vec3::splat(0.01)),
             Visibility::default(),

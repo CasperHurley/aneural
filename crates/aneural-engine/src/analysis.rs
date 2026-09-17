@@ -1,4 +1,4 @@
-//! Language analysis → IMPORTS / RE_EXPORTS / REFERENCES / DEPENDS_ON edges.
+//! Language analysis → IMPORTS / REFERENCES edges.
 
 use aneural_core::kinds::{EdgeKind, NodeKind, Source};
 use aneural_core::{Edge, Node, NodeId, Workspace};
@@ -28,7 +28,6 @@ pub fn analyze(
     let src_id = NodeId::file(rel);
     for (import, resolved) in fa.imports {
         let kind = match import.kind {
-            ImportKind::ReExport => EdgeKind::RE_EXPORTS,
             ImportKind::Require | ImportKind::Include | ImportKind::Mod => EdgeKind::REFERENCES,
             _ => EdgeKind::IMPORTS,
         };
@@ -83,10 +82,8 @@ pub fn analyze(
                     )
                     .with_prop("ecosystem", ecosystem.clone()),
                 );
-                out.edges.push(base(
-                    NodeId::package(&ecosystem, &name),
-                    EdgeKind::DEPENDS_ON,
-                ));
+                out.edges
+                    .push(base(NodeId::package(&ecosystem, &name), kind));
             }
             Resolved::Unresolved { reason } => {
                 if reason != "stdlib" {
@@ -100,7 +97,9 @@ pub fn analyze(
             }
         }
     }
-    // dedupe edges with the same (kind, dst): keep the first, merge lines
+    // dedupe edges with the same (kind, dst): keep the first, merge lines,
+    // and remember every way the file pulled it in (an import and a re-export
+    // of the same module are one edge)
     let mut seen = std::collections::HashMap::<(String, NodeId), usize>::new();
     let mut merged: Vec<Edge> = Vec::new();
     for e in out.edges.drain(..) {
@@ -115,6 +114,15 @@ pub fn analyze(
                     .or_insert_with(|| serde_json::Value::Array(vec![first_line]));
                 if let (serde_json::Value::Array(arr), Some(l)) = (lines, b.get("line")) {
                     arr.push(l.clone());
+                }
+                let first_kind = a.get("importKind").cloned().unwrap_or_default();
+                let kinds = a
+                    .entry("importKinds")
+                    .or_insert_with(|| serde_json::Value::Array(vec![first_kind]));
+                if let (serde_json::Value::Array(arr), Some(k)) = (kinds, b.get("importKind"))
+                    && !arr.contains(k)
+                {
+                    arr.push(k.clone());
                 }
             }
             continue;

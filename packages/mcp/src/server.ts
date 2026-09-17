@@ -155,7 +155,10 @@ export function createAneuralServer(opts: AneuralServerOptions): AneuralServer {
         ids: z.array(z.string()).min(1),
         depth: z.number().int().min(0).max(6).optional(),
         direction: z.enum(['in', 'out', 'both']).optional(),
-        edgeKinds: z.array(z.string()).optional(),
+        edgeKinds: z
+          .array(z.string())
+          .optional()
+          .describe('e.g. ["CONTAINS","IMPORTS","REFERENCES","ANNOTATES","RELATES_TO"]'),
         limit: z.number().int().positive().optional(),
       }),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },

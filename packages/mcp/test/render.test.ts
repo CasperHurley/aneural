@@ -52,7 +52,7 @@ function fakeApi(focus: FocusShape | null): FocusApi {
           source: 'lang',
         },
         {
-          kind: 'DEPENDS_ON',
+          kind: 'IMPORTS',
           src: 'file:src/index.ts',
           dst: 'pkg:npm/react',
           props: {},

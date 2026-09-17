@@ -5,13 +5,15 @@
 //! palette ([`crate::theme`]), the glow around the nodes, the breath in the
 //! graph and the drift of the spores. At 0 all of that is switched off and
 //! the app is exactly the tool it is at noon; the further into the night, the
-//! more it looks like the thing it is named after.
+//! more it looks like the thing it is named after. The one motion that keeps
+//! going by day is the float of nodes that relate to others rather than sit in
+//! the tree: that is how their relation is shown, not atmosphere.
 //!
 //! The clock can be overruled — `gui.circadian` in `config.json`, or the dial
 //! in the top bar — because a demo at 2am and a screenshot for a deck both
 //! want to choose.
 
-use crate::graph::{Drift, GraphNode};
+use crate::graph::{Drift, GraphNode, GraphState};
 use crate::theme::Palette;
 use crate::workspace::WorkspaceRes;
 use bevy::prelude::*;
@@ -25,10 +27,16 @@ const BREATH_PERIOD: f32 = 9.0;
 const BREATH_WAVELENGTH: f32 = 900.0;
 /// How far a node can wander from where the layout put it, at the deepest
 /// point of the night. Well under a node's radius, so nothing ever looks
-/// misplaced — only unsettled.
-const DRIFT_PIXELS: f32 = 3.2;
+/// misplaced — only unsettled. In screen pixels: zoomed out on a whole
+/// codebase, a wander measured in world units would be too small to see.
+const DRIFT_PIXELS: f32 = 4.0;
 /// Normalises the two wanders below so their sum tops out at exactly 1.
 const DRIFT_NORM: f32 = 0.487;
+/// How far a floating node strays from where the layout holds it, day or
+/// night. Wider than a node, so it visibly hovers instead of sitting still.
+const FLOAT_PIXELS: f32 = 11.0;
+/// The slowest and quickest a floating node takes to circle once, in seconds.
+const FLOAT_SECONDS: (f32, f32) = (26.0, 44.0);
 /// Seconds between readings of the wall clock. Nothing here moves fast.
 const CLOCK_INTERVAL: f32 = 2.0;
 
@@ -180,9 +188,22 @@ impl Vibe {
             (seed & 0xFFFF) as f32 / 65535.0 * TAU,
             ((seed >> 16) & 0xFFFF) as f32 / 65535.0 * TAU,
         );
-        let slow = Vec2::new((t * 0.21 + p1).sin(), (t * 0.17 + p2).cos());
-        let quick = Vec2::new((t * 0.53 + p2).sin(), (t * 0.47 + p1).cos());
+        let slow = Vec2::new((t * 0.12 + p1).sin(), (t * 0.10 + p2).cos());
+        let quick = Vec2::new((t * 0.30 + p2).sin(), (t * 0.27 + p1).cos());
         (slow + quick * 0.45) * amp * DRIFT_NORM
+    }
+
+    /// Where a floating node hovers relative to its place: a slow lap around
+    /// it whose reach swells and shrinks, each node at its own pace and phase.
+    pub fn float(&self, seed: u32) -> Vec2 {
+        let (fast, slow) = FLOAT_SECONDS;
+        let u = |bits: u32| (bits & 0x3FF) as f32 / 1023.0;
+        let period = fast + (slow - fast) * u(seed >> 3);
+        // half of them circle the other way
+        let turn = if seed & 1 == 0 { 1.0 } else { -1.0 };
+        let angle = turn * TAU * self.clock / period + u(seed >> 13) * TAU;
+        let reach = 0.7 + 0.3 * (self.clock * 0.17 + u(seed >> 23) * TAU).sin();
+        Vec2::from_angle(angle) * reach * FLOAT_PIXELS
     }
 }
 
@@ -285,27 +306,33 @@ fn tick(time: Res<Time>, mut vibe: ResMut<Vibe>) {
 }
 
 /// Hand every node its wander for this frame. `Drift` is read by
-/// `sync_transforms` and by the hyphae, so both ends of an edge agree.
+/// `sync_transforms`, picking and the hyphae, so all of them agree.
 fn drift_nodes(
     vibe: Res<Vibe>,
-    mut nodes: Query<&mut Drift, With<GraphNode>>,
-    mut drifting: Local<bool>,
+    graph: Res<GraphState>,
+    camera: Query<&Projection, With<crate::camera::MainCamera>>,
+    mut nodes: Query<(Entity, &GraphNode, &mut Drift)>,
 ) {
-    if vibe.night < 0.01 {
-        // Park them back on the layout's positions once, then stop paying for
-        // a graph that is not moving.
-        if !*drifting {
-            return;
-        }
-        *drifting = false;
-        for mut d in &mut nodes {
-            d.offset = Vec2::ZERO;
-        }
+    // Both wanders are set in screen pixels, so a graph zoomed out to fit a
+    // whole codebase moves as visibly as one filling the window.
+    let Ok(Projection::Orthographic(ortho)) = camera.single() else {
         return;
-    }
-    *drifting = true;
-    for mut d in &mut nodes {
-        d.offset = vibe.drift(d.seed);
+    };
+    let zoom = ortho.scale.max(1e-3);
+    let night = vibe.night >= 0.01;
+    for (e, gn, mut d) in &mut nodes {
+        let mut offset = Vec2::ZERO;
+        if graph.floats(e, &gn.id) {
+            offset += vibe.float(d.seed) * zoom;
+        }
+        if night {
+            offset += vibe.drift(d.seed) * zoom;
+        }
+        // Still nodes are left untouched, so a quiet graph is not re-sent
+        // to the renderer every frame.
+        if d.offset != offset {
+            d.offset = offset;
+        }
     }
 }
 
@@ -395,6 +422,23 @@ mod tests {
             vibe.clock = step as f32 * 0.05;
             for seed in [0u32, 7, 913_377, u32::MAX] {
                 assert!(vibe.drift(seed).length() <= DRIFT_PIXELS + 1e-3);
+            }
+        }
+    }
+
+    #[test]
+    fn floating_keeps_its_distance_and_moves() {
+        let mut vibe = Vibe::new(VibeMode::Day);
+        for seed in [0u32, 7, 913_377, u32::MAX] {
+            vibe.clock = 0.0;
+            let start = vibe.float(seed);
+            vibe.clock = 3.0;
+            let later = vibe.float(seed);
+            assert!(start.distance(later) > 0.5, "seed {seed} stood still");
+            for step in 0..2000 {
+                vibe.clock = step as f32 * 0.05;
+                let r = vibe.float(seed).length();
+                assert!((0.4 * FLOAT_PIXELS - 1e-3..=FLOAT_PIXELS + 1e-3).contains(&r));
             }
         }
     }

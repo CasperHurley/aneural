@@ -117,9 +117,11 @@ fn indexes_sample_workspace_and_reacts_live() {
         })
         .unwrap();
     assert!(
-        app.iter()
-            .any(|e| e.kind == EdgeKind::RE_EXPORTS
-                && e.dst == NodeId::file("apps/web/src/lib/util.ts")),
+        app.iter().any(|e| e.kind == EdgeKind::IMPORTS
+            && e.props["importKinds"]
+                .as_array()
+                .is_some_and(|k| k.contains(&"re-export".into()))
+            && e.dst == NodeId::file("apps/web/src/lib/util.ts")),
         "{app:?}"
     );
     assert!(
@@ -205,20 +207,18 @@ fn indexes_sample_workspace_and_reacts_live() {
         "{rb:?}"
     );
 
-    // manifests
+    // packages are imported, not declared: nothing links a manifest to one
     let pj = store
         .get_edges(&EdgeQuery {
             src: Some(NodeId::file("apps/web/package.json")),
-            kinds: vec![EdgeKind::DEPENDS_ON.into()],
             ..Default::default()
         })
         .unwrap();
-    assert!(pj.iter().any(|e| e.dst == NodeId::package("npm", "react")));
+    assert!(pj.is_empty(), "{pj:?}");
     assert!(
-        store
-            .get_node(&NodeId::package("cargo", "serde"))
-            .unwrap()
-            .is_some()
+        out.iter()
+            .any(|e| e.kind == EdgeKind::IMPORTS && e.dst == NodeId::package("npm", "react")),
+        "{out:?}"
     );
 
     // spores

@@ -3,7 +3,7 @@
 //! a pan (see `camera`); a background click without movement clears selection.
 
 use crate::camera::{CanvasRect, MainCamera, PanGrab, UiCapture};
-use crate::graph::{GraphNode, GraphState, Hidden, Pinned, Pos, Vel};
+use crate::graph::{Drift, GraphNode, GraphState, Hidden, Pinned, Pos, Vel};
 use crate::layout::LayoutParams;
 use crate::workspace::node_radius;
 use aneural_core::NodeId;
@@ -60,12 +60,15 @@ fn cursor_world(
 
 fn nearest(
     world: Vec2,
-    nodes: &Query<(Entity, &GraphNode, &Pos, Has<Pinned>), Without<Hidden>>,
+    nodes: &Query<(Entity, &GraphNode, &Pos, Option<&Drift>, Has<Pinned>), Without<Hidden>>,
 ) -> Option<(Entity, NodeId, Vec2, bool)> {
     let mut best: Option<(f32, Entity, NodeId, Vec2, bool)> = None;
-    for (e, gn, p, pinned) in nodes {
+    for (e, gn, p, drift, pinned) in nodes {
         let r = node_radius(&gn.kind) + 4.0;
-        let d = p.0.distance(world);
+        // Hit where the node is drawn, but hand back where the layout has it,
+        // so a drag starts without a jump.
+        let drawn = p.0 + drift.map(|d| d.offset).unwrap_or(Vec2::ZERO);
+        let d = drawn.distance(world);
         if d <= r && best.as_ref().is_none_or(|b| d < b.0) {
             best = Some((d, e, gn.id.clone(), p.0, pinned));
         }
@@ -83,7 +86,7 @@ pub fn pick(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut queries: ParamSet<(
-        Query<(Entity, &GraphNode, &Pos, Has<Pinned>), Without<Hidden>>,
+        Query<(Entity, &GraphNode, &Pos, Option<&Drift>, Has<Pinned>), Without<Hidden>>,
         Query<(&mut Pos, &mut Vel), With<GraphNode>>,
     )>,
     mut selection: ResMut<Selection>,

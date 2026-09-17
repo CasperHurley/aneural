@@ -8,14 +8,17 @@
 
 use aneural_core::focus::Direction;
 use aneural_core::graph::DeltaPhase;
-use aneural_core::kinds::{EdgeKind, NodeKind};
+use aneural_core::kinds::NodeKind;
 use aneural_core::{Edge, GraphDelta, Node, NodeId, Subgraph};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-pub const USER_VERSION: i32 = 1;
+/// Bump whenever what gets indexed changes shape, not just the tables: a cache
+/// from before is dropped and rebuilt rather than served stale.
+/// 2: RE_EXPORTS and DEPENDS_ON folded into IMPORTS, manifests no longer parsed.
+pub const USER_VERSION: i32 = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -336,15 +339,13 @@ impl Store {
         Ok(delta)
     }
 
-    /// Remove `Package` nodes with no incoming `DEPENDS_ON` edges.
+    /// Remove `Package` nodes nothing imports any more.
     pub fn gc_orphan_packages(&mut self) -> Result<Vec<NodeId>> {
         let ids: Vec<NodeId> = {
             let mut st = self.conn.prepare(
-                "SELECT n.id FROM nodes n WHERE n.kind = ?1 AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.dst = n.id AND e.kind = ?2)",
+                "SELECT n.id FROM nodes n WHERE n.kind = ?1 AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.dst = n.id)",
             )?;
-            let rows = st.query_map(params![NodeKind::PACKAGE, EdgeKind::DEPENDS_ON], |r| {
-                r.get::<_, String>(0)
-            })?;
+            let rows = st.query_map(params![NodeKind::PACKAGE], |r| r.get::<_, String>(0))?;
             rows.map(|r| r.map(NodeId::new))
                 .collect::<std::result::Result<_, _>>()?
         };
@@ -778,7 +779,7 @@ fn like_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aneural_core::kinds::Source;
+    use aneural_core::kinds::{EdgeKind, Source};
 
     fn file(p: &str) -> Node {
         Node::new(
@@ -852,7 +853,7 @@ mod tests {
             )
             .with_origin("src/b.ts"),
             Edge::new(
-                EdgeKind::DEPENDS_ON,
+                EdgeKind::IMPORTS,
                 NodeId::file("src/a.ts"),
                 NodeId::package("npm", "react"),
                 Source::LANG,
@@ -914,7 +915,7 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-        assert_eq!(imports.len(), 1);
+        assert_eq!(imports.len(), 2);
     }
 
     #[test]
@@ -927,8 +928,8 @@ mod tests {
             limit: None,
         };
         let g = s.neighborhood(&[NodeId::file("src/a.ts")], &q).unwrap();
-        assert_eq!(g.nodes.len(), 2);
-        assert_eq!(g.edges.len(), 1);
+        assert_eq!(g.nodes.len(), 3, "a.ts, b.ts and the react it imports");
+        assert_eq!(g.edges.len(), 2);
         let q2 = NeighborhoodQuery {
             depth: 2,
             direction: Some(Direction::Out),
@@ -936,7 +937,7 @@ mod tests {
             limit: None,
         };
         let g2 = s.neighborhood(&[NodeId::file("src/a.ts")], &q2).unwrap();
-        assert_eq!(g2.nodes.len(), 3);
+        assert_eq!(g2.nodes.len(), 4);
         let q3 = NeighborhoodQuery {
             depth: 3,
             direction: Some(Direction::Both),
@@ -987,7 +988,7 @@ mod tests {
         assert_eq!(
             d1.removed_edges.len(),
             2,
-            "old IMPORTS + DEPENDS_ON from a.ts are gone"
+            "both old IMPORTS from a.ts are gone"
         );
         assert_eq!(d1.nodes.len(), 1);
 

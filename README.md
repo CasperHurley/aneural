@@ -5,8 +5,8 @@ ecosystem of them — as a growing mycelium of typed nodes and relationships, ke
 vibe-code with Claude Code or Codex, and hands the part you're looking at to your assistant as context.
 
 - **GUI** (`aneural-gui`, Rust + Bevy): 2D fungal graph of folders, files, repos, manifests, packages and
-  spore-derived nodes (comments, plans, ideas, notes). Typed edges: `CONTAINS`, `IMPORTS`, `RE_EXPORTS`,
-  `REFERENCES`, `DEPENDS_ON`, `ANNOTATES`, `RELATES_TO`. Grows live as files change.
+  spore-derived nodes (comments, plans, ideas, notes). Typed edges: `CONTAINS`, `IMPORTS`,
+  `REFERENCES`, `ANNOTATES`, `RELATES_TO`. Grows live as files change.
 - **CLI** (`aneural`, npm): `aneural init` creates an Obsidian-style `.aneural/` directory; `index`,
   `query`, `focus`, `spores`, `doctor`, `mcp`.
 - **Spores**: lightweight, *inferred* alternatives to JIRA/Obsidian. Nothing to maintain — TODOs, plan

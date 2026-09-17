@@ -1,7 +1,7 @@
 //! Node visuals (circle mesh + icon sprite + label), hyphae edge drawing, and
 //! the bioluminescence that comes over all of it after dark.
 
-use crate::camera::MainCamera;
+use crate::camera::{FADED_LAYER, HYPHAE_LAYER, LIT_HYPHAE_LAYER, MainCamera};
 use crate::circadian::Vibe;
 use crate::graph::{Drift, GraphEdge, GraphNode, GraphState, GrowIn, Hidden, Pos};
 use crate::picking::{Hovered, Selection};
@@ -10,6 +10,7 @@ use crate::workspace::{WorkspaceRes, node_radius};
 use aneural_core::Node;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::entity::EntityHashSet;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use std::collections::HashMap;
@@ -70,6 +71,9 @@ impl Plugin for RenderPlugin {
         app.init_resource::<IconAtlas>()
             .init_resource::<GlowTexture>()
             .init_resource::<MeshCache>()
+            .init_resource::<Spotlight>()
+            .init_gizmo_group::<Skeleton>()
+            .init_gizmo_group::<LitHyphae>()
             .add_systems(
                 Startup,
                 (build_icon_atlas, build_glow_texture, hyphae_behind_nodes),
@@ -83,19 +87,206 @@ impl Plugin for RenderPlugin {
                     selection_ring,
                     hover_scale,
                     node_colors,
+                    fade_layers,
                     night_chrome,
                     breathe_halos,
                 ),
+            )
+            .add_systems(
+                Update,
+                aim_spotlight
+                    .before(draw_edges)
+                    .before(node_colors)
+                    .before(fade_layers),
             );
     }
 }
 
+/// The folder tree's hyphae: the body of the mycelium, drawn thicker than
+/// the links between files so the growth reads first and the wiring second.
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub struct Skeleton;
+
+/// The hyphae of the node in focus. They are drawn in a pass of their own, over
+/// the nodes that have faded back but under the ones still lit.
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub struct LitHyphae;
+
+/// Stroke widths in screen pixels, whatever the zoom.
+const SKELETON_WIDTH: f32 = 2.4;
+const LINK_WIDTH: f32 = 1.0;
+const LIT_WIDTH: f32 = 2.0;
+
 /// 2D gizmos are always queued last, whatever their depth, so the hyphae would
-/// paint over the nodes. Park them on their own render layer: the main camera
-/// draws that layer, then `NodeCamera` redraws the nodes over the top.
+/// paint over the nodes. Park them on render layers of their own, drawn by the
+/// underlay cameras before the main pass (see [`crate::camera::Underlay`]).
 fn hyphae_behind_nodes(mut store: ResMut<GizmoConfigStore>) {
     let (config, _) = store.config_mut::<DefaultGizmoConfigGroup>();
-    config.render_layers = RenderLayers::layer(crate::camera::HYPHAE_LAYER);
+    config.render_layers = RenderLayers::layer(HYPHAE_LAYER);
+    config.line.width = LINK_WIDTH;
+    let (config, _) = store.config_mut::<Skeleton>();
+    config.render_layers = RenderLayers::layer(HYPHAE_LAYER);
+    config.line.width = SKELETON_WIDTH;
+    // round joints, or a thick bowed strand shows notches at every bend
+    config.line.joints = GizmoLineJoint::Round(4);
+    let (config, _) = store.config_mut::<LitHyphae>();
+    config.render_layers = RenderLayers::layer(LIT_HYPHAE_LAYER);
+    config.line.width = LIT_WIDTH;
+    config.line.joints = GizmoLineJoint::Round(4);
+}
+
+/// What is lit right now; everything else fades back. Worked out once a frame
+/// so the hyphae, the node colours and the render layers always agree.
+#[derive(Resource, Default, PartialEq)]
+pub struct Spotlight {
+    /// Nodes that stay lit. `None` when nothing is singled out.
+    pub keep: Option<EntityHashSet>,
+    pub hyphae: LitHyphaeRule,
+    /// Bumped whenever the spotlight moves.
+    pub moves: u64,
+}
+
+#[derive(Default, PartialEq)]
+pub enum LitHyphaeRule {
+    #[default]
+    None,
+    /// Every hypha touching this node: a node in hand.
+    Touching(Entity),
+    /// Hyphae with both ends lit: a node kind pointed at in the drawer.
+    Between,
+    /// Every hypha of this kind: an edge kind pointed at in the drawer.
+    Kind(String),
+}
+
+impl Spotlight {
+    pub fn on(&self) -> bool {
+        self.keep.is_some()
+    }
+
+    pub fn lights(&self, e: &GraphEdge) -> bool {
+        match &self.hyphae {
+            LitHyphaeRule::None => false,
+            LitHyphaeRule::Touching(f) => *f == e.src || *f == e.dst,
+            LitHyphaeRule::Between => self
+                .keep
+                .as_ref()
+                .is_some_and(|k| k.contains(&e.src) && k.contains(&e.dst)),
+            LitHyphaeRule::Kind(kind) => e.kind == *kind,
+        }
+    }
+}
+
+/// A kind pointed at in the Filters drawer outranks the node in hand: the
+/// pointer is on the drawer, so that is what the user is asking about.
+fn aim_spotlight(
+    mut spot: ResMut<Spotlight>,
+    selection: Res<Selection>,
+    hovered: Res<Hovered>,
+    graph: Res<GraphState>,
+    filters: Res<crate::filters::Filters>,
+    nodes: Query<(Entity, &GraphNode, Has<Hidden>)>,
+    edges: Query<&GraphEdge>,
+) {
+    use crate::filters::PointedKind;
+    let (keep, hyphae) = match &filters.pointed {
+        Some(PointedKind::Node(kind)) => (
+            Some(
+                nodes
+                    .iter()
+                    .filter(|(_, n, hidden)| !hidden && n.kind == *kind)
+                    .map(|(e, ..)| e)
+                    .collect(),
+            ),
+            LitHyphaeRule::Between,
+        ),
+        Some(PointedKind::Edge(kind)) => {
+            let mut keep = EntityHashSet::default();
+            if filters.edge_visible(kind) {
+                for e in edges.iter().filter(|e| e.kind == *kind) {
+                    keep.insert(e.src);
+                    keep.insert(e.dst);
+                }
+            }
+            (Some(keep), LitHyphaeRule::Kind(kind.clone()))
+        }
+        None => {
+            let focus = selection
+                .primary
+                .as_ref()
+                .or(hovered.0.as_ref())
+                .and_then(|id| Some((id, *graph.by_id.get(id)?)));
+            match focus {
+                Some((id, f)) => {
+                    let mut keep = EntityHashSet::default();
+                    keep.insert(f);
+                    for (n, _) in graph.neighbors(id) {
+                        if let Some(&e) = graph.by_id.get(n) {
+                            keep.insert(e);
+                        }
+                    }
+                    (Some(keep), LitHyphaeRule::Touching(f))
+                }
+                None => (None, LitHyphaeRule::None),
+            }
+        }
+    };
+    if spot.keep != keep || spot.hyphae != hyphae {
+        spot.keep = keep;
+        spot.hyphae = hyphae;
+        spot.moves += 1;
+    }
+}
+
+/// Send the faded nodes to the pass under the focused node's hyphae, and bring
+/// them back once nothing is in focus.
+#[allow(clippy::type_complexity)]
+fn fade_layers(
+    mut commands: Commands,
+    spot: Res<Spotlight>,
+    parts: Query<
+        (Entity, &ChildOf, Has<RenderLayers>),
+        Or<(
+            With<NodeBody>,
+            With<NodeIcon>,
+            With<NodeLabel>,
+            With<GlowHalo>,
+        )>,
+    >,
+) {
+    for (part, node, layered) in &parts {
+        let faded = spot
+            .keep
+            .as_ref()
+            .is_some_and(|k| !k.contains(&node.parent()));
+        // Parts of a node that stays put are left alone, so moving the pointer
+        // costs a write only for the nodes whose place actually changes.
+        match (faded, layered) {
+            (true, false) => {
+                commands
+                    .entity(part)
+                    .insert(RenderLayers::layer(FADED_LAYER));
+            }
+            (false, true) => {
+                commands.entity(part).remove::<RenderLayers>();
+            }
+            _ => {}
+        }
+    }
+}
+
+/// One hypha's strokes, for whichever pass it is drawn in.
+enum Stroke {
+    Flat(Vec<Vec2>, Color),
+    Graded(Vec<(Vec2, Color)>),
+}
+
+fn paint<C: GizmoConfigGroup>(gizmos: &mut Gizmos<C>, strokes: Vec<Stroke>) {
+    for s in strokes {
+        match s {
+            Stroke::Flat(pts, color) => gizmos.linestrip_2d(pts, color),
+            Stroke::Graded(pts) => gizmos.linestrip_gradient_2d(pts),
+        }
+    }
 }
 
 fn build_icon_atlas(mut atlas: ResMut<IconAtlas>, mut images: ResMut<Assets<Image>>) {
@@ -239,15 +430,24 @@ pub fn shape_mesh(shape: &str, r: f32) -> Mesh {
 }
 
 /// Cubic Bézier hyphae sample points between two positions, sampled into
-/// `segments` pieces. A hypha only a few pixels long needs two.
-pub fn hypha_points(a: Vec2, b: Vec2, seed: u32, t_max: f32, segments: usize) -> Vec<Vec2> {
+/// `segments` pieces. A hypha only a few pixels long needs two. `sway` pushes
+/// the two control points sideways, in world units, on top of the bend the
+/// seed gives it.
+pub fn hypha_points(
+    a: Vec2,
+    b: Vec2,
+    seed: u32,
+    sway: (f32, f32),
+    t_max: f32,
+    segments: usize,
+) -> Vec<Vec2> {
     let chord = b - a;
     let len = chord.length().max(1.0);
     let perp = chord.perp() / len;
     let n1 = ((seed % 1000) as f32 / 1000.0) * 2.0 - 1.0;
     let n2 = (((seed / 1000) % 1000) as f32 / 1000.0) * 2.0 - 1.0;
-    let c1 = a + chord * 0.3 + perp * len * BOW * n1;
-    let c2 = a + chord * 0.7 + perp * len * BOW * n2;
+    let c1 = a + chord * 0.3 + perp * (len * BOW * n1 + sway.0);
+    let c2 = a + chord * 0.7 + perp * (len * BOW * n2 + sway.1);
     let segments = segments.max(1);
     let count = ((segments as f32 * t_max).ceil() as usize).clamp(1, segments);
     let mut pts = Vec::with_capacity(count + 1);
@@ -264,6 +464,43 @@ pub fn hypha_points(a: Vec2, b: Vec2, seed: u32, t_max: f32, segments: usize) ->
 /// fraction of its length. Also the padding the cull box needs.
 const BOW: f32 = 0.18;
 
+/// No hypha is ever quite still: each one sways a little, day and night, as if
+/// something were moving through it. At most this many *screen* pixels at a
+/// control point — measured in world units it would vanish the moment the graph
+/// was zoomed out to fit — and never more than [`SWAY_SHARE`] of the strand's
+/// own length, so a short hypha does not flap.
+const SWAY_REACH: f32 = 5.5;
+const SWAY_SHARE: f32 = 0.07;
+/// The quickest and slowest a strand takes to sway once, in seconds. Slow
+/// enough that the mesh is never seen to move, only noticed to have moved.
+const SWAY_SECONDS: (f32, f32) = (9.0, 16.0);
+/// The folder tree is the living body of the mesh rather than a link drawn
+/// across it, so it moves a little more than the rest.
+const TREE_SWAY: f32 = 1.5;
+
+/// After dark a strand now and then warbles: a quick shiver that runs through
+/// it and dies away, as if something had passed along it. How far it throws the
+/// strand, in screen pixels, on top of its sway.
+const WARBLE_REACH: f32 = 3.6;
+/// How long one warble lasts, and how many shivers it fits into that.
+const WARBLE_SECONDS: f32 = 1.6;
+const WARBLE_SHIVERS: f32 = 4.5;
+/// The shortest and longest a strand waits between warbles. Minutes apart, and
+/// each strand keeps its own clock, so they never come in a chorus.
+const WARBLE_APART: (f32, f32) = (300.0, 700.0);
+
+/// How far a strand's two control points lean right now, `scale` times the
+/// usual reach. They move out of step, so the strand undulates rather than
+/// swinging stiffly like a rope.
+fn sway(clock: f32, seed: u32, len: f32, scale: f32, zoom: f32) -> (f32, f32) {
+    let (fast, slow) = SWAY_SECONDS;
+    let period = fast + (slow - fast) * ((seed >> 11) % 1000) as f32 / 1000.0;
+    let phase = ((seed >> 3) % 1000) as f32 / 1000.0 * std::f32::consts::TAU;
+    let w = clock / period * std::f32::consts::TAU + phase;
+    let reach = (SWAY_REACH * scale * zoom).min(len * SWAY_SHARE * scale);
+    (w.sin() * reach, (w * 1.3 + 2.1).sin() * reach)
+}
+
 /// Roughly how many screen pixels of hypha each sample covers. Curves read as
 /// curves at this rate, and a graph of thousands stops paying for the rest.
 const PIXELS_PER_SAMPLE: f32 = 26.0;
@@ -276,6 +513,36 @@ const GHOST: f32 = 0.05;
 const PULSE_SECONDS: (f32, f32) = (7.0, 14.0);
 /// How much of a hypha one pulse lights at a time.
 const PULSE_WIDTH: f32 = 0.16;
+
+/// A number in 0..1 from some bits of a strand's seed.
+fn seeded(bits: u32) -> f32 {
+    (bits % 1000) as f32 / 1000.0
+}
+
+/// How hard a strand is shivering this instant: nothing at all almost always,
+/// and for a second or so at a time, rarely, a damped quiver. Night only, and
+/// it fades in and out with the night itself.
+fn warble(clock: f32, seed: u32, night: f32, len: f32, zoom: f32) -> f32 {
+    if night < 0.05 {
+        return 0.0;
+    }
+    let (soon, later) = WARBLE_APART;
+    let apart = soon + (later - soon) * seeded(seed >> 17);
+    // its own moment in its own cycle
+    let since = (clock - seeded(seed >> 5) * apart).rem_euclid(apart);
+    if since > WARBLE_SECONDS {
+        return 0.0;
+    }
+    // a bell over the shiver, so it arrives and leaves rather than switching on
+    let envelope = (std::f32::consts::PI * since / WARBLE_SECONDS)
+        .sin()
+        .powi(2);
+    let reach = (WARBLE_REACH * zoom).min(len * 0.12);
+    (std::f32::consts::TAU * WARBLE_SHIVERS * since / WARBLE_SECONDS).sin()
+        * envelope
+        * reach
+        * night
+}
 
 /// Where a hypha's pulse is along its length right now, in a cycle that
 /// carries it off the far end and leaves a dark gap before the next.
@@ -290,13 +557,14 @@ fn pulse_head(clock: f32, seed: u32) -> f32 {
 #[allow(clippy::too_many_arguments)]
 fn draw_edges(
     mut gizmos: Gizmos,
+    mut skeleton: Gizmos<Skeleton>,
+    mut lit_gizmos: Gizmos<LitHyphae>,
     edges: Query<(&GraphEdge, Option<&GrowIn>)>,
     nodes: Query<(&Pos, Option<&Drift>, Has<Hidden>), With<GraphNode>>,
     camera: Query<(&Transform, &Projection), With<MainCamera>>,
     graph: Res<GraphState>,
     filters: Res<crate::filters::Filters>,
-    selection: Res<Selection>,
-    hovered: Res<Hovered>,
+    spot: Res<Spotlight>,
     vibe: Res<Vibe>,
 ) {
     let Ok((cam, Projection::Orthographic(ortho))) = camera.single() else {
@@ -305,7 +573,9 @@ fn draw_edges(
     let eye = cam.translation.truncate();
     let half = ortho.area.size() * 0.5 * 1.1;
     let (view_min, view_max) = (eye - half, eye + half);
-    let scale = ortho.scale.max(1e-3);
+    // World units per screen pixel: what keeps the strands' width and their
+    // sway the same size on screen however far the graph is zoomed out.
+    let scale_px = ortho.scale.max(1e-3);
     let palette = &vibe.palette;
     let night = palette.night;
     // After dark the whole mesh dims and lifts together with the breath, and
@@ -313,22 +583,22 @@ fn draw_edges(
     let swell = 1.0 + 0.10 * night * vibe.breath();
     let pulsing = night > 0.04;
 
-    // Focus and context: with one node in hand its own hyphae stay lit and the
-    // rest of the mesh drops to a whisper, so a single thread can be followed
-    // across a crowd instead of vanishing into it.
-    let focus = selection
-        .primary
-        .as_ref()
-        .or(hovered.0.as_ref())
-        .and_then(|id| graph.by_id.get(id))
-        .copied();
+    // Focus and context: with a node in hand (or a kind pointed at) its
+    // hyphae stay lit and the rest of the mesh drops to a whisper, so a single
+    // thread can be followed across a crowd instead of vanishing into it.
 
     for (e, grow) in &edges {
         if !filters.edge_visible(&e.kind) {
             continue;
         }
-        let lit = focus.is_some_and(|f| f == e.src || f == e.dst);
+        let lit = spot.lights(e);
         let structural = e.kind == "CONTAINS";
+        // A relation is shown by where its node floats, not by a strand. Only
+        // with one end in hand does a faint thread say exactly what to.
+        let relation = e.kind == "RELATES_TO";
+        if relation && !lit {
+            continue;
+        }
         // Hairball control. A link between two nodes that are each already
         // tangled in dozens says very little on its own and costs a stroke
         // through the middle of everything, so it waits until one of its ends
@@ -350,47 +620,70 @@ fn draw_edges(
         let (a, b) = (a.0 + drift(da), b.0 + drift(db));
 
         let len = (b - a).length();
-        let pad = Vec2::splat(len * BOW);
+        let pad = Vec2::splat(len * BOW + (SWAY_REACH * TREE_SWAY + WARBLE_REACH) * scale_px);
         let (lo, hi) = (a.min(b) - pad, a.max(b) + pad);
         if hi.x < view_min.x || lo.x > view_max.x || hi.y < view_min.y || lo.y > view_max.y {
             continue;
         }
 
         let t = grow.map(|g| g.t).unwrap_or(1.0);
-        let segments = ((len / scale / PIXELS_PER_SAMPLE).ceil() as usize).clamp(2, 20);
-        let pts = hypha_points(a, b, e.seed, t, segments);
+        let segments = ((len / scale_px / PIXELS_PER_SAMPLE).ceil() as usize).clamp(2, 20);
+        let scale = if structural { TREE_SWAY } else { 1.0 };
+        let (s1, s2) = sway(vibe.clock, e.seed, len, scale, scale_px);
+        // The two ends of the shiver lean opposite ways, so it travels through
+        // the strand rather than swinging the whole thing sideways.
+        let w = warble(vibe.clock, e.seed, night, len, scale_px);
+        let bend = (s1 + w, s2 - w * 0.8);
+        let pts = hypha_points(a, b, e.seed, bend, t, segments);
         let base = palette.edge(&e.kind);
-        let alpha = match (lit, focus.is_some(), structural) {
+        let alpha = match (lit, spot.on(), structural) {
+            (true, _, _) if relation => 0.45,
             (true, _, _) => 1.0,
-            (false, true, _) => GHOST,
-            (false, false, true) => 0.3,
-            (false, false, false) => 0.4,
+            // with a node in hand the tree stays as a faint outline to find
+            // your way by, and the other links all but vanish
+            (false, true, true) => 0.12,
+            (false, true, false) => GHOST,
+            (false, false, true) => 0.55,
+            (false, false, false) => 0.22,
         } * swell;
+        let mut strokes = Vec::with_capacity(3);
         // The glow doubles a hypha's ink, so it is spent only on the thread
         // the user is actually looking at.
-        if lit {
+        if lit && !relation {
             let off = (b - a).perp().normalize_or_zero() * 1.5;
             let glow = base.with_alpha(0.3);
-            gizmos.linestrip_2d(pts.iter().map(|p| *p + off), glow);
-            gizmos.linestrip_2d(pts.iter().map(|p| *p - off), glow);
+            strokes.push(Stroke::Flat(pts.iter().map(|p| *p + off).collect(), glow));
+            strokes.push(Stroke::Flat(pts.iter().map(|p| *p - off).collect(), glow));
         }
         let head = pulse_head(vibe.clock, e.seed);
         // Most hyphae are between pulses at any moment; those cost nothing
         // extra and are drawn flat.
         if !pulsing || !(-PULSE_WIDTH * 3.0..1.0 + PULSE_WIDTH * 3.0).contains(&head) {
-            gizmos.linestrip_2d(pts.iter().copied(), base.with_alpha(alpha.min(1.0)));
-            continue;
+            strokes.push(Stroke::Flat(pts, base.with_alpha(alpha.min(1.0))));
+        } else {
+            let last = (pts.len() - 1).max(1) as f32;
+            strokes.push(Stroke::Graded(
+                pts.iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        let u = (i as f32 / last) * t;
+                        let g = (-((u - head) / PULSE_WIDTH).powi(2)).exp() * night;
+                        (
+                            *p,
+                            theme::mix(base, palette.accent, g * 0.55)
+                                .with_alpha((alpha * (1.0 + g * 1.3)).min(1.0)),
+                        )
+                    })
+                    .collect(),
+            ));
         }
-        let last = (pts.len() - 1).max(1) as f32;
-        gizmos.linestrip_gradient_2d(pts.iter().enumerate().map(|(i, p)| {
-            let u = (i as f32 / last) * t;
-            let g = (-((u - head) / PULSE_WIDTH).powi(2)).exp() * night;
-            (
-                *p,
-                theme::mix(base, palette.accent, g * 0.55)
-                    .with_alpha((alpha * (1.0 + g * 1.3)).min(1.0)),
-            )
-        }));
+        if lit {
+            paint(&mut lit_gizmos, strokes);
+        } else if structural {
+            paint(&mut skeleton, strokes);
+        } else {
+            paint(&mut gizmos, strokes);
+        }
     }
 }
 
@@ -452,36 +745,26 @@ fn draw_spore_motes(
 /// so darkening towards it reads as a fade without paying for transparency on
 /// a thousand meshes.
 fn node_colors(
-    selection: Res<Selection>,
-    hovered: Res<Hovered>,
-    graph: Res<GraphState>,
+    spot: Res<Spotlight>,
     vibe: Res<Vibe>,
     bodies: Query<(&ChildOf, &NodeBody, &MeshMaterial2d<ColorMaterial>)>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    mut last: Local<Option<(Option<Entity>, u8)>>,
+    mut last: Local<Option<(u64, u8)>>,
 ) {
-    let id = selection.primary.as_ref().or(hovered.0.as_ref());
-    let focus = id.and_then(|id| graph.by_id.get(id)).copied();
     // The night moves too slowly to repaint a thousand materials every frame;
     // a step of it is a fine grain to notice.
     let step = quantized_night(&vibe);
-    if *last == Some((focus, step)) {
+    if *last == Some((spot.moves, step)) {
         return;
     }
-    *last = Some((focus, step));
+    *last = Some((spot.moves, step));
 
-    let mut keep = bevy::ecs::entity::EntityHashSet::default();
-    if let (Some(f), Some(id)) = (focus, id) {
-        keep.insert(f);
-        for (n, _) in graph.neighbors(id) {
-            if let Some(&e) = graph.by_id.get(n) {
-                keep.insert(e);
-            }
-        }
-    }
     for (parent, body, mat) in &bodies {
         let lit = vibe.palette.bioluminesce(body.0);
-        let faded = focus.is_some() && !keep.contains(&parent.parent());
+        let faded = spot
+            .keep
+            .as_ref()
+            .is_some_and(|k| !k.contains(&parent.parent()));
         let want = if faded { dimmed(lit) } else { lit };
         // Moving from one node to its neighbour leaves almost every other node
         // exactly as it was, so look before writing: an untouched material is
@@ -702,5 +985,109 @@ fn hover_scale(
             1.0
         };
         t.scale = Vec3::splat(want * breath);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_spotlight_lights_its_own_hyphae() {
+        let mut world = World::new();
+        let [a, b, c] = [(); 3].map(|_| world.spawn_empty().id());
+        let edge = |kind: &str, src, dst| GraphEdge {
+            kind: kind.into(),
+            src,
+            dst,
+            seed: 0,
+        };
+        let (ab, bc) = (edge("IMPORTS", a, b), edge("CONTAINS", b, c));
+
+        let off = Spotlight::default();
+        assert!(!off.on() && !off.lights(&ab));
+
+        let in_hand = Spotlight {
+            keep: Some([a, b].into_iter().collect()),
+            hyphae: LitHyphaeRule::Touching(a),
+            moves: 1,
+        };
+        assert!(in_hand.lights(&ab) && !in_hand.lights(&bc));
+
+        let node_kind = Spotlight {
+            keep: Some([b, c].into_iter().collect()),
+            hyphae: LitHyphaeRule::Between,
+            moves: 1,
+        };
+        assert!(node_kind.lights(&bc) && !node_kind.lights(&ab));
+
+        let edge_kind = Spotlight {
+            keep: Some([a, b].into_iter().collect()),
+            hyphae: LitHyphaeRule::Kind("IMPORTS".into()),
+            moves: 1,
+        };
+        assert!(edge_kind.lights(&ab) && !edge_kind.lights(&bc));
+    }
+
+    #[test]
+    fn every_hypha_sways_gently_and_keeps_its_roots() {
+        let (a, b) = (Vec2::ZERO, Vec2::new(120.0, 0.0));
+        for seed in [0u32, 99, 123_456_789, u32::MAX] {
+            for scale in [1.0, TREE_SWAY] {
+                let short = sway(3.0, seed, 20.0, scale, 1.0);
+                assert!(short.0.abs() <= 20.0 * SWAY_SHARE * scale + 1e-4);
+                let moved = (0..40).any(|i| {
+                    sway(i as f32 * 0.5, seed, 120.0, scale, 1.0)
+                        != sway(0.0, seed, 120.0, scale, 1.0)
+                });
+                assert!(moved, "seed {seed} never sways");
+                for i in 0..400 {
+                    let s = sway(i as f32 * 0.1, seed, 120.0, scale, 1.0);
+                    let most = SWAY_REACH * scale + 1e-4;
+                    assert!(s.0.abs() <= most && s.1.abs() <= most);
+                    let pts = hypha_points(a, b, seed, s, 1.0, 12);
+                    assert_eq!(pts[0], a);
+                    assert!(pts.last().unwrap().distance(b) < 1e-3);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn zooming_out_keeps_the_sway_the_same_size_on_screen() {
+        // Four times as far out: four times the world units, the same pixels.
+        let close = sway(1.7, 77, 4000.0, 1.0, 1.0);
+        let far = sway(1.7, 77, 4000.0, 1.0, 4.0);
+        assert!((far.0 - close.0 * 4.0).abs() < 1e-3);
+        assert!((far.1 - close.1 * 4.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn warbles_are_rare_after_dark_and_never_come_by_day() {
+        for seed in [0u32, 5, 77_777, u32::MAX] {
+            let (mut shivering, mut biggest) = (0, 0.0f32);
+            let (steps, step) = (200_000, 0.02);
+            for i in 0..steps {
+                let clock = i as f32 * step;
+                assert_eq!(warble(clock, seed, 0.0, 200.0, 1.0), 0.0, "daylight");
+                let w = warble(clock, seed, 1.0, 200.0, 1.0);
+                if w != 0.0 {
+                    shivering += 1;
+                }
+                biggest = biggest.max(w.abs());
+            }
+            // it happens, it stays small, and it is over almost all of the time
+            assert!(biggest > 0.5, "seed {seed} never warbles");
+            assert!(biggest <= WARBLE_REACH + 1e-4, "{biggest}");
+            let share = shivering as f32 / steps as f32;
+            assert!(share < 0.01, "seed {seed} warbles {share} of the time");
+        }
+    }
+
+    #[test]
+    fn the_tree_moves_more_than_the_links() {
+        let tree = sway(2.0, 4242, 300.0, TREE_SWAY, 1.0);
+        let link = sway(2.0, 4242, 300.0, 1.0, 1.0);
+        assert!(tree.0.abs() > link.0.abs() && tree.1.abs() > link.1.abs());
     }
 }

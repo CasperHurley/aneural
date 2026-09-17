@@ -26,15 +26,24 @@ const PAN_DEADZONE: f32 = 4.0;
 #[derive(Component)]
 pub struct MainCamera;
 
-/// An earlier pass over the same view, holding only the hyphae. 2D gizmos are
+/// An earlier pass over the same view as the main camera. 2D gizmos are
 /// always queued last within a pass, so edges drawn alongside the nodes would
-/// paint over them; giving the hyphae their own earlier camera puts them
-/// underneath, and leaves the main pass — and so egui's panels — on top.
+/// paint over them; stacking passes is how they go underneath instead. From
+/// the bottom:
+///
+/// 1. [`HYPHAE_LAYER`]: every hypha not being followed.
+/// 2. [`FADED_LAYER`]: nodes faded because another node is in focus.
+/// 3. [`LIT_HYPHAE_LAYER`]: the focused node's own hyphae.
+/// 4. The main pass: every other node, then egui's panels.
+///
+/// Nodes always sit over hyphae, except that the thread being followed runs
+/// over the nodes that have stepped back.
 #[derive(Component)]
-pub struct HyphaeCamera;
+pub struct Underlay;
 
-/// The render layer the hyphae gizmos and their camera live on.
 pub const HYPHAE_LAYER: usize = 1;
+pub const FADED_LAYER: usize = 2;
+pub const LIT_HYPHAE_LAYER: usize = 3;
 
 #[derive(Resource, Default)]
 pub struct UiCapture {
@@ -132,27 +141,41 @@ fn spawn_camera(mut commands: Commands) {
             ..default()
         },
     ));
-    commands.spawn((
-        HyphaeCamera,
-        Camera2d,
-        Camera {
-            order: -1,
-            ..default()
-        },
-        RenderLayers::layer(HYPHAE_LAYER),
-    ));
+    for (order, layer) in [
+        (-3, HYPHAE_LAYER),
+        (-2, FADED_LAYER),
+        (-1, LIT_HYPHAE_LAYER),
+    ] {
+        commands.spawn((
+            Underlay,
+            Camera2d,
+            Camera {
+                order,
+                // the bottom pass clears the frame, the rest paint over it
+                clear_color: if layer == HYPHAE_LAYER {
+                    ClearColorConfig::Default
+                } else {
+                    ClearColorConfig::None
+                },
+                ..default()
+            },
+            RenderLayers::layer(layer),
+        ));
+    }
 }
 
-/// Keep the hyphae pass looking through the same lens as the main camera.
+/// Keep the underlay passes looking through the same lens as the main camera.
 fn sync_hyphae_camera(
-    main: Query<(&Transform, &Projection), (With<MainCamera>, Without<HyphaeCamera>)>,
-    mut overlay: Query<(&mut Transform, &mut Projection), With<HyphaeCamera>>,
+    main: Query<(&Transform, &Projection), (With<MainCamera>, Without<Underlay>)>,
+    mut underlays: Query<(&mut Transform, &mut Projection), With<Underlay>>,
 ) {
-    let (Ok((t, p)), Ok((mut ot, mut op))) = (main.single(), overlay.single_mut()) else {
+    let Ok((t, p)) = main.single() else {
         return;
     };
-    *ot = *t;
-    *op = p.clone();
+    for (mut ot, mut op) in &mut underlays {
+        *ot = *t;
+        *op = p.clone();
+    }
 }
 
 fn read_ui_capture(mut contexts: EguiContexts, mut capture: ResMut<UiCapture>) {

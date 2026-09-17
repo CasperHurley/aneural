@@ -4,6 +4,7 @@ use crate::engine::IndexStatus;
 use crate::graph::{GraphNode, GraphState, Hidden};
 use crate::picking::Selection;
 use aneural_core::NodeId;
+use aneural_core::kinds::EdgeKind;
 use bevy::prelude::*;
 use std::collections::HashSet;
 
@@ -17,15 +18,24 @@ const CROWD_LIMIT: u32 = 8;
 /// and no dial to turn.
 pub const FOCUS_DEPTH: u32 = 1;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum PointedKind {
+    Node(String),
+    Edge(String),
+}
+
 #[derive(Resource, Debug, Clone)]
 pub struct Filters {
     /// Kinds hidden (empty = show all). Stored as an exclusion set so new kinds default to visible.
     pub hidden_kinds: HashSet<String>,
+    /// Edge kinds hidden. Only toggleable kinds ever land here.
     pub hidden_edge_kinds: HashSet<String>,
     /// Repo ids shown (empty = all).
     pub repos: HashSet<NodeId>,
     pub query: String,
-    pub show_structural_edges: bool,
+    /// The kind row the pointer is resting on in the Filters drawer, lighting
+    /// up everything of that kind while it stays there.
+    pub pointed: Option<PointedKind>,
     /// Show only what is selected and its neighbours — the same slice that
     /// goes to the assistant as the focus.
     pub focus_mode: bool,
@@ -40,7 +50,7 @@ impl Default for Filters {
             hidden_edge_kinds: HashSet::new(),
             repos: HashSet::new(),
             query: String::new(),
-            show_structural_edges: true,
+            pointed: None,
             focus_mode: false,
             last_generation: 0,
             dirty: true,
@@ -58,10 +68,7 @@ impl Filters {
         kind != "CONTAINS" && crowd > CROWD_LIMIT
     }
     pub fn edge_visible(&self, kind: &str) -> bool {
-        if kind == "CONTAINS" && !self.show_structural_edges {
-            return false;
-        }
-        !self.hidden_edge_kinds.contains(kind)
+        !EdgeKind::is_toggleable(kind) || !self.hidden_edge_kinds.contains(kind)
     }
     pub fn toggle_kind(&mut self, kind: &str) {
         if !self.hidden_kinds.remove(kind) {
@@ -88,8 +95,8 @@ impl Filters {
         }
     }
     pub fn edge_kinds_list(&self) -> Vec<String> {
-        let all = aneural_core::kinds::EdgeKind::ALL;
-        if self.hidden_edge_kinds.is_empty() && self.show_structural_edges {
+        let all = EdgeKind::ALL;
+        if self.hidden_edge_kinds.is_empty() {
             Vec::new()
         } else {
             all.iter()

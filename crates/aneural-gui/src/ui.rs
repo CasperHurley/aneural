@@ -3,7 +3,7 @@
 use crate::camera::{CanvasRect, FrameRequest, PanGrab, UiCapture};
 use crate::circadian::Vibe;
 use crate::engine::IndexStatus;
-use crate::filters::Filters;
+use crate::filters::{Filters, PointedKind};
 use crate::focus::FocusState;
 use crate::graph::{GraphEdge, GraphNode, GraphState, Hidden};
 use crate::picking::{Hovered, Selection};
@@ -421,6 +421,7 @@ fn panels(
     });
 
     let mut close_left = false;
+    let mut pointed = None;
     egui::Panel::left("filters").resizable(true).default_size(240.0).show_collapsible(ctx, &mut open.left, |ui| {
         close_left = panel_header(ui, "Filters", "⏴", "Hide the filters");
         let resp = ui.add(egui::TextEdit::singleline(&mut filters.query).hint_text("search label / path"));
@@ -434,31 +435,32 @@ fn panels(
                 let style = ws.style(&kind);
                 let (total, shown) = kind_counts.get(&kind).copied().unwrap_or((0, 0));
                 let mut on = filters.kind_visible(&kind);
-                ui.horizontal(|ui| {
+                let row = ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
                     ui.painter().circle_filled(rect.center(), 5.0, theme::egui_color(style.color));
                     if ui.checkbox(&mut on, format!("{} ({shown}/{total})", style.label)).hand().changed() {
                         filters.toggle_kind(&kind);
                     }
                 });
+                if row.response.contains_pointer() {
+                    pointed = Some(PointedKind::Node(kind.clone()));
+                }
             }
             ui.separator();
             ui.label(egui::RichText::new("Edge kinds").strong());
-            let mut structural = filters.show_structural_edges;
-            if ui.checkbox(&mut structural, format!("Contains (folder tree) ({})", edge_counts.get("CONTAINS").copied().unwrap_or(0))).hand().changed() {
-                filters.show_structural_edges = structural;
-                filters.dirty = true;
-            }
-            for kind in aneural_core::kinds::EdgeKind::ALL.iter().filter(|k| **k != "CONTAINS") {
+            for kind in aneural_core::kinds::EdgeKind::ALL.iter().filter(|k| aneural_core::kinds::EdgeKind::is_toggleable(k)) {
                 let mut on = !filters.hidden_edge_kinds.contains(*kind);
                 let label = aneural_core::kinds::EdgeKind::label(kind);
-                ui.horizontal(|ui| {
+                let row = ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 4.0), egui::Sense::hover());
                     ui.painter().rect_filled(rect, 1.0, theme::egui_color(palette.edge(kind)));
                     if ui.checkbox(&mut on, format!("{label} ({})", edge_counts.get(*kind).copied().unwrap_or(0))).hand().changed() {
                         filters.toggle_edge_kind(kind);
                     }
                 });
+                if row.response.contains_pointer() {
+                    pointed = Some(PointedKind::Edge(kind.to_string()));
+                }
             }
             ui.separator();
             ui.label(egui::RichText::new("Repos").strong());
@@ -596,6 +598,9 @@ fn panels(
     });
 
     open.left &= !close_left;
+    if filters.pointed != pointed {
+        filters.pointed = pointed;
+    }
     open.right &= !close_right;
 
     // whatever the panels left over is the graph canvas
